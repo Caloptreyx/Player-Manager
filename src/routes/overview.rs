@@ -1,7 +1,7 @@
 pub mod get {
     use crate::{
         context::Context,
-        model::{Info, Overview},
+        model::{GameInfo, Info, Overview},
     };
     use shared::{
         ApiError, GetState,
@@ -39,7 +39,11 @@ pub mod get {
         let (descriptor, contents) =
             tokio::try_join!(game.descriptor(&ctx), game.overview(&ctx, &permissions))?;
         ApiResponse::new_serialized(Overview {
-            game: Some(descriptor),
+            game: Some(GameInfo {
+                id: game.id(),
+                family: game.family(),
+                descriptor,
+            }),
             state: ctx.state,
             info: contents.info,
             lists: contents.lists,

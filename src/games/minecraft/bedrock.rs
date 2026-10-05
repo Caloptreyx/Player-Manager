@@ -62,8 +62,6 @@ pub(crate) fn descriptor(state: ServerState) -> Descriptor {
     };
 
     Descriptor {
-        id: ID,
-        family: FAMILY,
         player_name: PlayerName {
             pattern: &BEDROCK_NAME,
         },

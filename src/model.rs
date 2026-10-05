@@ -161,8 +161,6 @@ pub struct PlayerId {
 /// What a game offers on a server in its current state.
 #[derive(ToSchema, Serialize)]
 pub struct Descriptor {
-    pub id: &'static str,
-    pub family: &'static str,
     pub player_name: PlayerName,
     pub player_id: PlayerId,
     /// In display order.
@@ -172,6 +170,18 @@ pub struct Descriptor {
     pub whitelist_toggle: Option<MethodCapability>,
     pub online: Option<Capability>,
     pub kick: Option<KickCapability>,
+}
+
+/// The detected game as the overview reports it: its identity from [`crate::games::Game`]
+/// plus its descriptor.
+#[derive(ToSchema, Serialize)]
+pub struct GameInfo {
+    /// Stable id the frontend keys on, e.g. `minecraft_java`.
+    pub id: &'static str,
+    /// Groups games that share code and UI, e.g. `minecraft`.
+    pub family: &'static str,
+    #[serde(flatten)]
+    pub descriptor: Descriptor,
 }
 
 #[derive(ToSchema, Serialize, Default)]
@@ -191,7 +201,7 @@ pub struct FileError {
 #[derive(ToSchema, Serialize)]
 pub struct Overview {
     /// `None`: no supported game was detected; everything else is empty.
-    pub game: Option<Descriptor>,
+    pub game: Option<GameInfo>,
     pub state: ServerState,
     pub info: Info,
     /// Exactly the kinds of `game.lists`.

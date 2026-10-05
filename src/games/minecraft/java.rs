@@ -94,8 +94,6 @@ pub(crate) fn descriptor(state: ServerState, default_level: u8) -> Descriptor {
     let level = usize::from(default_level.clamp(1, 4)) - 1;
 
     Descriptor {
-        id: ID,
-        family: FAMILY,
         player_name: PlayerName {
             pattern: &JAVA_NAME,
         },
