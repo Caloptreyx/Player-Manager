@@ -1,12 +1,4 @@
-import {
-  faBan,
-  faCircleInfo,
-  faCubes,
-  faListCheck,
-  faNetworkWired,
-  faPlug,
-  faUserShield,
-} from '@fortawesome/free-solid-svg-icons';
+import { faCircleInfo, faCubes, faPlug } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
@@ -18,32 +10,22 @@ import Alert from '@/elements/feedback/Alert.tsx';
 import EmptyState from '@/elements/feedback/EmptyState.tsx';
 import Spinner from '@/elements/feedback/Spinner.tsx';
 import Tabs from '@/elements/layout/Tabs.tsx';
-import { useServerCan } from '@/plugins/usePermissions.ts';
+import { useServerPermissions } from '@/plugins/usePermissions.ts';
 import { useServerStore } from '@/stores/server.ts';
 import { getOnlinePlayers, getOverview, playerManagerQueryKey } from '../api.ts';
-import BansTab from '../components/BansTab.tsx';
 import ConfirmActionModal from '../components/ConfirmActionModal.tsx';
 import FileErrorsAlert from '../components/FileErrorsAlert.tsx';
-import IpBansTab from '../components/IpBansTab.tsx';
+import ListTab from '../components/ListTab.tsx';
+import { LIST_STYLES } from '../components/listStyles.ts';
 import OnlineTab from '../components/OnlineTab.tsx';
-import OperatorsTab from '../components/OperatorsTab.tsx';
 import OverviewHeader from '../components/OverviewHeader.tsx';
 import { type ConfirmRequest, type PlayerManager, PlayerManagerContext } from '../components/playerManager.ts';
-import WhitelistTab from '../components/WhitelistTab.tsx';
-import {
-  type Access,
-  type Granted,
-  kickAccess,
-  listAccess,
-  mutationMethod,
-  onlineAccess,
-  whitelistToggleAccess,
-} from '../lib/access.ts';
-import { type OnlinePlayers, withoutPlayer } from '../lib/players.ts';
+import { GAME_NAMES, gameText, gameUi } from '../games/index.ts';
+import { capabilityAccess, editHint, gamePermissions } from '../lib/access.ts';
+import { LIST_KINDS, type OnlinePlayers } from '../lib/model.ts';
+import { withoutPlayer } from '../lib/players.ts';
 import { useExtTranslations } from '../translations.ts';
 import useMutationRunner from './useMutationRunner.ts';
-
-const NO_ACCESS: Access = { visible: false, blocker: null };
 
 function TabCount({ children }: { children: ReactNode }) {
   return (
@@ -59,12 +41,6 @@ export default function PlayerManagerPage() {
   const serverUuid = useServerStore((state) => state.server.uuid);
   const liveState = useServerStore((state) => state.state);
 
-  const granted: Granted = {
-    console: useServerCan('control.console'),
-    readConsole: useServerCan('control.read-console'),
-    writeFiles: useServerCan('files.create'),
-  };
-
   const overviewQuery = useQuery({
     queryKey: [...playerManagerQueryKey(serverUuid), 'overview'],
     queryFn: () => getOverview(serverUuid),
@@ -73,7 +49,7 @@ export default function PlayerManagerPage() {
   const [tab, setTab] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
 
-  // the websocket knows about power changes first; the overview (and with it the method) follows
+  // the websocket knows about power changes first; the overview (and with it the capabilities) follows
   const previousState = useRef(liveState);
   useEffect(() => {
     if (previousState.current === liveState) return;
@@ -82,10 +58,16 @@ export default function PlayerManagerPage() {
   }, [liveState, queryClient, serverUuid]);
 
   const overview = overviewQuery.data;
-  const edition = overview?.edition ?? null;
+  const game = overview?.game ?? null;
   const state = overview?.state ?? 'offline';
-  const online = edition ? onlineAccess(state, granted) : NO_ACCESS;
-  const activeTab = tab ?? (state === 'running' && online.visible ? 'online' : 'whitelist');
+
+  // the capabilities name the permissions they need; check them all with one hook call
+  const permissions = gamePermissions(game);
+  const held = useServerPermissions(permissions);
+  const granted = new Set(permissions.filter((_, index) => held[index]));
+
+  const online = capabilityAccess(game?.online ?? null, granted);
+  const activeTab = tab ?? (state === 'running' && online.visible ? 'online' : (game?.lists[0]?.kind ?? 'online'));
 
   const onlineKey = [...playerManagerQueryKey(serverUuid), 'online'];
   const onlineQuery = useQuery({
@@ -136,37 +118,41 @@ export default function PlayerManagerPage() {
     );
   }
 
-  if (!edition) {
+  if (!game) {
     return (
       <ServerContentContainer title={title} subtitle={subtitle}>
         <EmptyState
           icon={faCubes}
           title={tExt('notDetected.title', {})}
-          description={tExt('notDetected.description', {})}
+          description={tExt('notDetected.description', { games: GAME_NAMES.join(', ') })}
         />
       </ServerContentContainer>
     );
   }
 
-  const bedrock = edition === 'bedrock';
-  const method = mutationMethod(edition, state);
+  const ui = gameUi(game.id);
+  const text = gameText(tExt, ui);
   const context: PlayerManager = {
     serverUuid,
-    edition,
+    game,
+    ui,
     overview,
-    method,
-    listAccess: listAccess(edition, state, granted),
-    kickAccess: kickAccess(state, granted),
+    editAccess: capabilityAccess(game.edit, granted),
+    kickAccess: capabilityAccess(game.kick, granted),
     run,
     confirm: setPendingConfirm,
   };
 
-  const methodText =
-    method === null
-      ? tExt('method.transition', { state: tExt(`states.${state}`, {}).toLowerCase() })
-      : bedrock
-        ? tExt(state === 'running' ? 'method.bedrockRunning' : 'method.bedrockOffline', {})
-        : tExt(state === 'running' ? 'method.javaRunning' : 'method.javaOffline', {});
+  const hint = editHint(game.edit);
+  const hintText =
+    hint === 'transition'
+      ? text('method.transition', { state: text(`states.${state}`, {}).toLowerCase() })
+      : hint && text(`method.${hint}`, {});
+  // lists the game lacks but players look for get a tab explaining why
+  const missingLists = LIST_KINDS.flatMap((kind) => {
+    const note = ui.missingLists[kind];
+    return note && !game.lists.some((spec) => spec.kind === kind) ? [{ kind, note }] : [];
+  });
 
   return (
     <ServerContentContainer title={title} subtitle={subtitle}>
@@ -175,97 +161,80 @@ export default function PlayerManagerPage() {
 
         <div className='flex flex-col gap-4'>
           <OverviewHeader
-            toggleAccess={whitelistToggleAccess(edition, state, granted)}
+            toggleAccess={capabilityAccess(game.whitelist_toggle, granted)}
             refreshing={overviewQuery.isFetching || syncing}
             onRefresh={() => overviewQuery.refetch()}
           />
 
           {restartRequired && (
             <Alert color='yellow' withCloseButton onClose={dismissRestart}>
-              {tExt('header.restartRequired', { list: tExt(bedrock ? 'header.allowlist' : 'header.whitelist', {}) })}
+              {text('header.restartRequired', { list: text('lists.whitelist.title', {}) })}
             </Alert>
           )}
           <FileErrorsAlert errors={overview.errors} />
 
-          <p className='flex items-center gap-2 text-sm text-(--mantine-color-dimmed)'>
-            <FontAwesomeIcon icon={faCircleInfo} />
-            {methodText}
-          </p>
+          {hintText && (
+            <p className='flex items-center gap-2 text-sm text-(--mantine-color-dimmed)'>
+              <FontAwesomeIcon icon={faCircleInfo} />
+              {hintText}
+            </p>
+          )}
 
           <Card>
             <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
               <Tabs.List>
-                <Tabs.Tab
-                  value='online'
-                  leftSection={<FontAwesomeIcon icon={faPlug} />}
-                  rightSection={
-                    onlineQuery.data && (
-                      <TabCount>
-                        {onlineQuery.data.count}/{onlineQuery.data.max}
-                      </TabCount>
-                    )
-                  }
-                >
-                  {tExt('tabs.online', {})}
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value='whitelist'
-                  leftSection={<FontAwesomeIcon icon={faListCheck} />}
-                  rightSection={<TabCount>{overview.whitelist.length}</TabCount>}
-                >
-                  {tExt(bedrock ? 'tabs.allowlist' : 'tabs.whitelist', {})}
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value='operators'
-                  leftSection={<FontAwesomeIcon icon={faUserShield} />}
-                  rightSection={<TabCount>{overview.operators.length}</TabCount>}
-                >
-                  {tExt('tabs.operators', {})}
-                </Tabs.Tab>
-                <Tabs.Tab
-                  value='bans'
-                  leftSection={<FontAwesomeIcon icon={faBan} />}
-                  rightSection={!bedrock && <TabCount>{overview.bans.length}</TabCount>}
-                >
-                  {tExt('tabs.bans', {})}
-                </Tabs.Tab>
-                {!bedrock && (
+                {game.online && (
                   <Tabs.Tab
-                    value='ip-bans'
-                    leftSection={<FontAwesomeIcon icon={faNetworkWired} />}
-                    rightSection={<TabCount>{overview.ip_bans.length}</TabCount>}
+                    value='online'
+                    leftSection={<FontAwesomeIcon icon={faPlug} />}
+                    rightSection={
+                      onlineQuery.data && (
+                        <TabCount>
+                          {onlineQuery.data.count}/{onlineQuery.data.max}
+                        </TabCount>
+                      )
+                    }
                   >
-                    {tExt('tabs.ipBans', {})}
+                    {text('online.tab', {})}
                   </Tabs.Tab>
                 )}
+                {game.lists.map(({ kind }) => (
+                  <Tabs.Tab
+                    key={kind}
+                    value={kind}
+                    leftSection={<FontAwesomeIcon icon={LIST_STYLES[kind].tab} />}
+                    rightSection={<TabCount>{overview.lists[kind]?.length ?? 0}</TabCount>}
+                  >
+                    {text(`lists.${kind}.title`, {})}
+                  </Tabs.Tab>
+                ))}
+                {missingLists.map(({ kind }) => (
+                  <Tabs.Tab key={kind} value={kind} leftSection={<FontAwesomeIcon icon={LIST_STYLES[kind].tab} />}>
+                    {text(`lists.${kind}.title`, {})}
+                  </Tabs.Tab>
+                ))}
               </Tabs.List>
 
-              <Tabs.Panel value='online' pt='md'>
-                <OnlineTab access={online} query={onlineQuery} onKicked={removeOnline} />
-              </Tabs.Panel>
-              <Tabs.Panel value='whitelist' pt='md'>
-                <WhitelistTab />
-              </Tabs.Panel>
-              <Tabs.Panel value='operators' pt='md'>
-                <OperatorsTab />
-              </Tabs.Panel>
-              <Tabs.Panel value='bans' pt='md'>
-                {bedrock ? (
-                  <EmptyState
-                    flush
-                    icon={faBan}
-                    title={tExt('bedrockBans.title', {})}
-                    description={tExt('bedrockBans.description', {})}
-                  />
-                ) : (
-                  <BansTab />
-                )}
-              </Tabs.Panel>
-              {!bedrock && (
-                <Tabs.Panel value='ip-bans' pt='md'>
-                  <IpBansTab />
+              {game.online && (
+                <Tabs.Panel value='online' pt='md'>
+                  <OnlineTab access={online} query={onlineQuery} onKicked={removeOnline} />
                 </Tabs.Panel>
               )}
+              {game.lists.map((spec) => (
+                <Tabs.Panel key={spec.kind} value={spec.kind} pt='md'>
+                  <ListTab spec={spec} />
+                </Tabs.Panel>
+              ))}
+              {missingLists.map(({ kind, note }) => (
+                <Tabs.Panel key={kind} value={kind} pt='md'>
+                  <EmptyState
+                    flush
+                    icon={LIST_STYLES[kind].tab}
+                    title={note.title(tExt)}
+                    description={note.description(tExt)}
+                  />
+                </Tabs.Panel>
+              ))}
             </Tabs>
           </Card>
         </div>

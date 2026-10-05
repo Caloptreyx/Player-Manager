@@ -5,11 +5,10 @@ use shared::{
 
 mod console;
 mod context;
-mod edition;
 mod files;
+mod games;
 mod lists;
-mod lookup;
-mod properties;
+mod model;
 mod routes;
 mod validate;
 

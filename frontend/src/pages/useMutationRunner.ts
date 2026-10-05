@@ -2,7 +2,8 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { httpErrorToHuman } from '@/api/axios.ts';
 import { useToast } from '@/providers/ToastProvider.tsx';
-import { type MutationResult, playerManagerQueryKey } from '../api.ts';
+import { playerManagerQueryKey } from '../api.ts';
+import type { MutationResult } from '../lib/model.ts';
 import { refetchDelay } from '../lib/players.ts';
 
 // runs mutations with toasts; console commands make the server write its files a moment later, so their

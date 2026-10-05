@@ -1,46 +1,47 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { validateId, validateIp, validateName, validateReason } from '../frontend/src/lib/validation.ts';
+import { bedrockGame, javaGame } from './fixtures.ts';
+
+const java = javaGame('offline');
+const bedrock = bedrockGame('offline');
 
 describe('validateName', () => {
-  test('java names are 1-16 word characters with an optional floodgate prefix', () => {
+  test('checks the name pattern of the game descriptor', () => {
     for (const name of ['Notch', 'a', 'x_1234567890ABCD', '.BedrockGuy', '*Prefixed']) {
-      assert.equal(validateName('java', name), null, name);
+      assert.equal(validateName(java, name), null, name);
     }
     for (const name of ['x_1234567890ABCDE', 'with space', 'dash-name', '..double', 'ümlaut']) {
-      assert.equal(validateName('java', name), 'javaName', name);
+      assert.equal(validateName(java, name), 'name', name);
     }
-    assert.equal(validateName('java', ''), 'required');
   });
 
-  test('bedrock gamertags allow inner spaces up to 32 characters', () => {
-    assert.equal(validateName('bedrock', 'Some Gamer 42'), null);
-    assert.equal(validateName('bedrock', 'a'.repeat(32)), null);
-    assert.equal(validateName('bedrock', 'a'.repeat(33)), 'bedrockName');
-    assert.equal(validateName('bedrock', ' Leading'), 'bedrockName');
-    assert.equal(validateName('bedrock', 'Trailing '), 'bedrockName');
-    assert.equal(validateName('bedrock', 'under_score'), 'bedrockName');
+  test('another game brings its own pattern', () => {
+    assert.equal(validateName(bedrock, 'Some Gamer 42'), null);
+    assert.equal(validateName(bedrock, 'a'.repeat(32)), null);
+    assert.equal(validateName(bedrock, 'a'.repeat(33)), 'name');
+    assert.equal(validateName(bedrock, ' Leading'), 'name');
+    assert.equal(validateName(bedrock, 'under_score'), 'name');
+  });
+
+  test('empty is required whatever the pattern accepts', () => {
+    assert.equal(validateName({ player_name: { pattern: '^.*$' } }, ''), 'required');
   });
 });
 
 describe('validateId', () => {
-  test('java accepts dashed and undashed uuids in any case', () => {
-    assert.equal(validateId('java', '069a79f4-44e9-4726-a5be-fca90e38aaf5'), null);
-    assert.equal(validateId('java', '069A79F444E94726A5BEFCA90E38AAF5'), null);
-    assert.equal(validateId('java', '069a79f4-44e94726a5befca90e38aaf5'), 'uuid');
-    assert.equal(validateId('java', '069a79f4'), 'uuid');
-  });
-
-  test('bedrock xuids are 1-20 digits', () => {
-    assert.equal(validateId('bedrock', '2535416409688276'), null);
-    assert.equal(validateId('bedrock', '1'.repeat(20)), null);
-    assert.equal(validateId('bedrock', '1'.repeat(21)), 'xuid');
-    assert.equal(validateId('bedrock', '12a'), 'xuid');
+  test('checks the id pattern of the game descriptor', () => {
+    assert.equal(validateId(java, '069a79f4-44e9-4726-a5be-fca90e38aaf5'), null);
+    assert.equal(validateId(java, '069A79F444E94726A5BEFCA90E38AAF5'), null);
+    assert.equal(validateId(java, '069a79f4-44e94726a5befca90e38aaf5'), 'id');
+    assert.equal(validateId(bedrock, '2535416409688276'), null);
+    assert.equal(validateId(bedrock, '1'.repeat(21)), 'id');
+    assert.equal(validateId(bedrock, '12a'), 'id');
   });
 
   test('an empty id is allowed', () => {
-    assert.equal(validateId('java', ''), null);
-    assert.equal(validateId('bedrock', ''), null);
+    assert.equal(validateId(java, ''), null);
+    assert.equal(validateId(bedrock, ''), null);
   });
 });
 

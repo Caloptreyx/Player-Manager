@@ -1,9 +1,10 @@
-//! The JSON player lists (`whitelist.json`, `ops.json`, `allowlist.json`, `permissions.json`...):
-//! arrays of objects, edited as `serde_json` values so fields this extension does not know
-//! survive (and keep their order, `serde_json` is built with `preserve_order`).
+//! JSON list files (Minecraft's `whitelist.json`, `ops.json`, `permissions.json`...): arrays of
+//! objects, edited as `serde_json` values so fields this extension does not know survive (and
+//! keep their order, `serde_json` is built with `preserve_order`).
+use crate::model::FileError;
 use serde_json::Value;
 
-pub type Entry = serde_json::Map<String, Value>;
+pub type Object = serde_json::Map<String, Value>;
 
 /// The entries of a list file; blank files are empty lists.
 pub fn parse(text: &str) -> Result<Vec<Value>, String> {
@@ -18,22 +19,42 @@ pub fn parse(text: &str) -> Result<Vec<Value>, String> {
     }
 }
 
+/// The entries of a list file read for display (see `Context::read_list`): empty when
+/// missing, and empty plus an entry in `errors` when it does not parse.
+pub fn shown(
+    file: &str,
+    result: Option<Result<Vec<Value>, String>>,
+    errors: &mut Vec<FileError>,
+) -> Vec<Value> {
+    match result {
+        None => Vec::new(),
+        Some(Ok(entries)) => entries,
+        Some(Err(message)) => {
+            errors.push(FileError {
+                file: file.to_string(),
+                message,
+            });
+            Vec::new()
+        }
+    }
+}
+
 /// Pretty JSON with two-space indentation, like the Gson output of the servers.
 pub fn render(entries: &[Value]) -> String {
     serde_json::to_string_pretty(entries).expect("JSON values always serialize")
 }
 
 /// The object entries (other values are kept in the file but never shown or matched).
-pub fn objects(entries: &[Value]) -> impl Iterator<Item = &Entry> {
+pub fn objects(entries: &[Value]) -> impl Iterator<Item = &Object> {
     entries.iter().filter_map(Value::as_object)
 }
 
-pub fn string<'a>(entry: &'a Entry, key: &str) -> Option<&'a str> {
+pub fn string<'a>(entry: &'a Object, key: &str) -> Option<&'a str> {
     entry.get(key).and_then(Value::as_str)
 }
 
 /// A string field, or a number field as its decimal text (Bedrock tools write xuids both ways).
-pub fn text(entry: &Entry, key: &str) -> Option<String> {
+pub fn text(entry: &Object, key: &str) -> Option<String> {
     match entry.get(key)? {
         Value::String(value) => Some(value.clone()),
         Value::Number(value) => Some(value.to_string()),
@@ -42,7 +63,7 @@ pub fn text(entry: &Entry, key: &str) -> Option<String> {
 }
 
 /// Whether the entry's `key` holds `name`, ignoring ASCII case.
-pub fn has_name(entry: &Entry, key: &str, name: &str) -> bool {
+pub fn has_name(entry: &Object, key: &str, name: &str) -> bool {
     string(entry, key).is_some_and(|value| value.eq_ignore_ascii_case(name))
 }
 
@@ -50,8 +71,8 @@ pub fn has_name(entry: &Entry, key: &str, name: &str) -> bool {
 /// listed twice) or appends a new one; `update` sets the fields.
 pub fn upsert(
     entries: &mut Vec<Value>,
-    matches: impl Fn(&Entry) -> bool,
-    update: impl FnOnce(&mut Entry),
+    matches: impl Fn(&Object) -> bool,
+    update: impl FnOnce(&mut Object),
 ) {
     let is_match = |value: &Value| value.as_object().is_some_and(&matches);
     match entries.iter().position(is_match) {
@@ -67,7 +88,7 @@ pub fn upsert(
             }
         }
         None => {
-            let mut entry = Entry::new();
+            let mut entry = Object::new();
             update(&mut entry);
             entries.push(Value::Object(entry));
         }
@@ -75,7 +96,7 @@ pub fn upsert(
 }
 
 /// Removes every entry `matches` accepts; how many were removed.
-pub fn remove(entries: &mut Vec<Value>, matches: impl Fn(&Entry) -> bool) -> usize {
+pub fn remove(entries: &mut Vec<Value>, matches: impl Fn(&Object) -> bool) -> usize {
     let before = entries.len();
     entries.retain(|value| !value.as_object().is_some_and(&matches));
     before - entries.len()

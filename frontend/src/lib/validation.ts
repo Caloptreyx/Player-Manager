@@ -1,36 +1,20 @@
-import type { Edition } from './players.ts';
+import type { Game } from './model.ts';
 
-// client-side mirror of the backend validation, for form feedback only; the backend stays authoritative
-export type FieldError =
-  | 'required'
-  | 'javaName'
-  | 'bedrockName'
-  | 'uuid'
-  | 'xuid'
-  | 'xuidRequired'
-  | 'reasonLength'
-  | 'reasonControl'
-  | 'ip'
-  | 'duplicate';
+// client-side mirror of the backend validation, for form feedback only; the backend stays authoritative and
+// checks names and ids against the same patterns the game descriptor carries
+export type FieldError = 'required' | 'name' | 'id' | 'reasonLength' | 'reasonControl' | 'ip' | 'duplicate';
 
 export const REASON_MAX_LENGTH = 256;
 
-const JAVA_NAME = /^[.*]?[A-Za-z0-9_]{1,16}$/;
-const BEDROCK_NAME = /^[A-Za-z0-9 ]{1,32}$/;
-const UUID = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
-const XUID = /^\d{1,20}$/;
-
-export const validateName = (edition: Edition, name: string): FieldError | null => {
+export const validateName = (game: Pick<Game, 'player_name'>, name: string): FieldError | null => {
   if (name === '') return 'required';
-  if (edition === 'java') return JAVA_NAME.test(name) ? null : 'javaName';
-  return BEDROCK_NAME.test(name) && name.trim() === name ? null : 'bedrockName';
+  return new RegExp(game.player_name.pattern).test(name) ? null : 'name';
 };
 
-/** An empty id is valid: every id field is optional unless the caller says otherwise. */
-export const validateId = (edition: Edition, id: string): FieldError | null => {
+/** An empty id is valid: ids are optional and looked up from the name. */
+export const validateId = (game: Pick<Game, 'player_id'>, id: string): FieldError | null => {
   if (id === '') return null;
-  if (edition === 'java') return UUID.test(id) ? null : 'uuid';
-  return XUID.test(id) ? null : 'xuid';
+  return new RegExp(game.player_id.pattern).test(id) ? null : 'id';
 };
 
 export const validateReason = (reason: string): FieldError | null => {

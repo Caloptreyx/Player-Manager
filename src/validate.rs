@@ -1,76 +1,43 @@
 //! Input validation. Everything that ends up in a console command passes through here, so
 //! nothing accepted may contain newlines or other control characters.
-use crate::edition::Edition;
+use regex::Regex;
+use serde::Serializer;
 use shared::response::ApiResponse;
 use std::net::IpAddr;
 
 pub const MAX_REASON_CHARS: usize = 256;
 
-/// A Java player name, optionally with a Floodgate prefix (`.` or `*`).
-pub fn java_name(name: &str) -> bool {
-    let rest = name.strip_prefix(['.', '*']).unwrap_or(name);
-    (1..=16).contains(&rest.len())
-        && rest
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+/// Compiles one of the anchored patterns games publish in their descriptor (meant for a
+/// `LazyLock`; the patterns are constants, so failing is a bug).
+pub fn compile(source: &str) -> Regex {
+    Regex::new(source).expect("game patterns are valid regexes")
 }
 
-/// An Xbox gamertag: 1–32 letters, digits and inner spaces.
-pub fn bedrock_name(name: &str) -> bool {
-    (1..=32).contains(&name.len())
-        && !name.starts_with(' ')
-        && !name.ends_with(' ')
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b' ')
+/// Serializes a pattern as its source, the string the frontend compiles with `RegExp`.
+pub fn pattern_source<S: Serializer>(pattern: &&Regex, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(pattern.as_str())
 }
 
-/// The Floodgate gamertag behind a prefixed Java name (`.Steve` → `Steve`).
-pub fn floodgate_gamertag(name: &str) -> Option<&str> {
-    name.strip_prefix(['.', '*'])
+fn matches(pattern: &Regex, value: &str) -> bool {
+    pattern.is_match(value) && !value.chars().any(char::is_control)
 }
 
-/// A UUID, dashed or not, as dashed lowercase.
-pub fn java_id(id: &str) -> Option<String> {
-    if id.len() != 32 && id.len() != 36 {
-        return None;
-    }
-    uuid::Uuid::parse_str(id)
-        .ok()
-        .map(|uuid| uuid.hyphenated().to_string())
-}
-
-/// An XUID: 1–20 decimal digits.
-pub fn bedrock_id(id: &str) -> bool {
-    (1..=20).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_digit())
-}
-
-pub fn name(edition: Edition, name: &str) -> Result<(), ApiResponse> {
-    let valid = match edition {
-        Edition::Java => java_name(name),
-        Edition::Bedrock => bedrock_name(name),
-    };
-    if valid {
+/// A player name matching the game's `player_name` pattern.
+pub fn player_name(pattern: &Regex, name: &str) -> Result<(), ApiResponse> {
+    if matches(pattern, name) {
         Ok(())
     } else {
-        Err(ApiResponse::error(match edition {
-            Edition::Java => "invalid player name",
-            Edition::Bedrock => "invalid gamertag",
-        }))
+        Err(ApiResponse::error("invalid player name"))
     }
 }
 
-/// The normalized id (dashed lowercase UUID or XUID).
-pub fn id(edition: Edition, id: &str) -> Result<String, ApiResponse> {
-    match edition {
-        Edition::Java => java_id(id).ok_or_else(|| ApiResponse::error("invalid UUID")),
-        Edition::Bedrock if bedrock_id(id) => Ok(id.to_string()),
-        Edition::Bedrock => Err(ApiResponse::error("invalid XUID")),
+/// A player id matching the game's `player_id` pattern.
+pub fn player_id(pattern: &Regex, id: &str) -> Result<(), ApiResponse> {
+    if matches(pattern, id) {
+        Ok(())
+    } else {
+        Err(ApiResponse::error("invalid player id"))
     }
-}
-
-pub fn optional_id(edition: Edition, value: Option<&str>) -> Result<Option<String>, ApiResponse> {
-    value.map(|value| id(edition, value)).transpose()
 }
 
 /// The trimmed reason, `None` when blank.
@@ -100,48 +67,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn java_names() {
-        assert!(java_name("Notch"));
-        assert!(java_name("a"));
-        assert!(java_name("abcdefghijklmnop"));
-        assert!(java_name(".Steve_1"));
-        assert!(java_name("*Steve"));
-        assert!(!java_name(""));
-        assert!(!java_name("."));
-        assert!(!java_name("abcdefghijklmnopq"));
-        assert!(!java_name("..Steve"));
-        assert!(!java_name("Ste ve"));
-        assert!(!java_name("Steve\nop Hacker"));
-        assert!(!java_name("Stéve"));
-    }
-
-    #[test]
-    fn bedrock_names() {
-        assert!(bedrock_name("Some Guy 42"));
-        assert!(bedrock_name(&"a".repeat(32)));
-        assert!(!bedrock_name(&"a".repeat(33)));
-        assert!(!bedrock_name(" Guy"));
-        assert!(!bedrock_name("Guy "));
-        assert!(!bedrock_name(""));
-        assert!(!bedrock_name("Guy_1"));
-        assert!(!bedrock_name("Guy\r"));
-    }
-
-    #[test]
-    fn ids() {
-        let dashed = "069a79f4-44e9-4726-a5be-fca90e38aaf5";
-        assert_eq!(java_id(dashed).as_deref(), Some(dashed));
-        assert_eq!(
-            java_id("069A79F444E94726A5BEFCA90E38AAF5").as_deref(),
-            Some(dashed)
-        );
-        assert_eq!(java_id("{069a79f4-44e9-4726-a5be-fca90e38aaf5}"), None);
-        assert_eq!(java_id("069a79f4"), None);
-        assert!(bedrock_id("2535428692371234"));
-        assert!(bedrock_id(&"9".repeat(20)));
-        assert!(!bedrock_id(&"9".repeat(21)));
-        assert!(!bedrock_id(""));
-        assert!(!bedrock_id("12a"));
+    fn patterns_reject_control_characters() {
+        let any = compile(r"^[\s\S]+$");
+        assert!(player_name(&any, "Steve").is_ok());
+        assert!(player_name(&any, "Steve\nop Hacker").is_err());
+        assert!(player_id(&any, "1\r").is_err());
+        assert!(player_name(&compile("^a$"), "b").is_err());
     }
 
     #[test]

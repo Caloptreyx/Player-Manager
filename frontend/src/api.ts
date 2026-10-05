@@ -1,18 +1,23 @@
 import { z } from 'zod';
 import { axiosInstance } from '@/api/axios.ts';
+import type { AddBody, RemoveBody } from './lib/lists.ts';
 import {
-  type Ban,
-  BEDROCK_LEVELS,
-  EDITIONS,
-  type IpBan,
+  BLOCKED,
+  type Capability,
+  type Entry,
+  type Game,
+  type KickCapability,
+  LIST_KINDS,
+  type ListKind,
+  type ListSpec,
+  METHODS,
+  type MethodCapability,
+  type MutationResult,
   type OnlinePlayers,
-  type Operator,
-  type OperatorLevel,
   type Overview,
   type Player,
   SERVER_STATES,
-  type WhitelistEntry,
-} from './lib/players.ts';
+} from './lib/model.ts';
 
 export const playerManagerBase = (serverUuid: string) => `/api/client/servers/${serverUuid}/player-manager`;
 
@@ -23,46 +28,63 @@ export const playerManagerQueryKey = (serverUuid: string) => ['dev.caloptreyx.pl
 
 const playerSchema: z.ZodType<Player> = z.object({ name: z.string(), id: z.string().nullable() });
 
-const whitelistEntrySchema: z.ZodType<WhitelistEntry> = z.object({
-  name: z.string(),
-  id: z.string().nullable(),
-  ignores_player_limit: z.boolean().nullable(),
-});
-
-const operatorSchema: z.ZodType<Operator> = z.object({
+const entrySchema: z.ZodType<Entry> = z.object({
   name: z.string().nullable(),
   id: z.string().nullable(),
-  level: z.union([z.number(), z.enum(BEDROCK_LEVELS)]),
+  ip: z.string().nullable(),
+  level: z.string().nullable(),
   bypasses_player_limit: z.boolean().nullable(),
-});
-
-const banSchema: z.ZodType<Ban> = z.object({
-  name: z.string(),
-  id: z.string().nullable(),
   reason: z.string().nullable(),
   source: z.string().nullable(),
   created: z.string().nullable(),
   expires: z.string().nullable(),
 });
 
-const ipBanSchema: z.ZodType<IpBan> = z.object({
-  ip: z.string(),
-  reason: z.string().nullable(),
-  source: z.string().nullable(),
-  created: z.string().nullable(),
-  expires: z.string().nullable(),
+const capabilityShape = {
+  requires: z.array(z.string()),
+  visible_with: z.array(z.string()),
+  blocked: z.enum(BLOCKED).nullable(),
+};
+
+const capabilitySchema: z.ZodType<Capability> = z.object(capabilityShape);
+
+const methodCapabilitySchema: z.ZodType<MethodCapability> = z.object({
+  ...capabilityShape,
+  method: z.enum(METHODS),
+});
+
+const kickCapabilitySchema: z.ZodType<KickCapability> = z.object({ ...capabilityShape, reason: z.boolean() });
+
+const listSpecSchema: z.ZodType<ListSpec> = z.object({
+  kind: z.enum(LIST_KINDS),
+  target: z.enum(['player', 'ip']),
+  id: z.enum(['none', 'optional']),
+  reason: z.boolean(),
+  levels: z.object({ options: z.array(z.string()), default: z.string() }).nullable(),
+  bypasses_player_limit: z.boolean(),
+});
+
+const gameSchema: z.ZodType<Game> = z.object({
+  id: z.string(),
+  family: z.string(),
+  player_name: z.object({ pattern: z.string() }),
+  player_id: z.object({ kind: z.string(), pattern: z.string() }),
+  lists: z.array(listSpecSchema),
+  edit: methodCapabilitySchema.nullable(),
+  whitelist_toggle: methodCapabilitySchema.nullable(),
+  online: capabilitySchema.nullable(),
+  kick: kickCapabilitySchema.nullable(),
 });
 
 const overviewSchema: z.ZodType<Overview> = z.object({
-  edition: z.enum(EDITIONS).nullable(),
+  game: gameSchema.nullable(),
   state: z.enum(SERVER_STATES),
-  online_mode: z.boolean().nullable(),
-  whitelist_enabled: z.boolean().nullable(),
-  max_players: z.number().nullable(),
-  whitelist: z.array(whitelistEntrySchema),
-  operators: z.array(operatorSchema),
-  bans: z.array(banSchema),
-  ip_bans: z.array(ipBanSchema),
+  info: z.object({
+    whitelist_enabled: z.boolean().nullable(),
+    max_players: z.number().nullable(),
+    online_mode: z.boolean().nullable(),
+  }),
+  lists: z.partialRecord(z.enum(LIST_KINDS), z.array(entrySchema)),
   known: z.array(playerSchema),
   errors: z.array(z.object({ file: z.string(), message: z.string() })),
 });
@@ -73,11 +95,10 @@ const onlinePlayersSchema: z.ZodType<OnlinePlayers> = z.object({
   players: z.array(playerSchema),
 });
 
-const mutationResultSchema = z.object({
-  method: z.enum(['command', 'file']),
+const mutationResultSchema: z.ZodType<MutationResult> = z.object({
+  method: z.enum(METHODS),
   restart_required: z.boolean(),
 });
-export type MutationResult = z.infer<typeof mutationResultSchema>;
 
 export const getOverview = async (serverUuid: string): Promise<Overview> => {
   const { data } = await axiosInstance.get(playerManagerBase(serverUuid));
@@ -101,34 +122,14 @@ const mutate = async (
   return mutationResultSchema.parse(data);
 };
 
-export const addToWhitelist = (
-  serverUuid: string,
-  body: { name: string; id?: string; ignores_player_limit?: boolean },
-) => mutate('post', serverUuid, '/whitelist', body);
+export const addToList = (serverUuid: string, kind: ListKind, body: AddBody) =>
+  mutate('post', serverUuid, `/lists/${kind}`, body);
 
-export const removeFromWhitelist = (serverUuid: string, name: string) =>
-  mutate('delete', serverUuid, '/whitelist', { name });
+export const removeFromList = (serverUuid: string, kind: ListKind, body: RemoveBody) =>
+  mutate('delete', serverUuid, `/lists/${kind}`, body);
 
 export const setWhitelistEnabled = (serverUuid: string, enabled: boolean) =>
-  mutate('put', serverUuid, '/whitelist/enabled', { enabled });
-
-export const addOperator = (
-  serverUuid: string,
-  body: { name: string; id?: string; level?: OperatorLevel; bypasses_player_limit?: boolean },
-) => mutate('post', serverUuid, '/operators', body);
-
-export const removeOperator = (serverUuid: string, body: { name?: string; id?: string }) =>
-  mutate('delete', serverUuid, '/operators', body);
-
-export const addBan = (serverUuid: string, body: { name: string; id?: string; reason?: string }) =>
-  mutate('post', serverUuid, '/bans', body);
-
-export const removeBan = (serverUuid: string, name: string) => mutate('delete', serverUuid, '/bans', { name });
-
-export const addIpBan = (serverUuid: string, body: { ip: string; reason?: string }) =>
-  mutate('post', serverUuid, '/ip-bans', body);
-
-export const removeIpBan = (serverUuid: string, ip: string) => mutate('delete', serverUuid, '/ip-bans', { ip });
+  mutate('put', serverUuid, '/whitelist', { enabled });
 
 export const kickPlayer = (serverUuid: string, body: { name: string; reason?: string }) =>
   mutate('post', serverUuid, '/kick', body);

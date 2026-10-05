@@ -4,9 +4,8 @@ import type { ReactNode } from 'react';
 import CopyOnClick from '@/elements/CopyOnClick.tsx';
 import Avatar from '@/elements/data-display/Avatar.tsx';
 import Tooltip from '@/elements/overlays/Tooltip.tsx';
-import { avatarUrl, type PlayerRef } from '../lib/players.ts';
-import { useExtTranslations } from '../translations.ts';
-import { usePlayerManager } from './playerManager.ts';
+import type { PlayerRef } from '../lib/players.ts';
+import { usePlayerManager, useText } from './playerManager.ts';
 
 // one line of a player list: avatar, name with badges, copyable id, optional details and the row actions;
 // rows without a player (ip bans) pass an `icon` and `title` instead
@@ -25,8 +24,8 @@ export default function PlayerRow({
   details?: ReactNode;
   actions?: ReactNode;
 }) {
-  const { t: tExt } = useExtTranslations();
-  const { edition } = usePlayerManager();
+  const text = useText();
+  const { ui } = usePlayerManager();
 
   const name = title ?? player?.name ?? null;
   const id = player?.id ?? null;
@@ -42,7 +41,7 @@ export default function PlayerRow({
           size={32}
           radius='sm'
           className='shrink-0'
-          src={player ? avatarUrl(edition, player) : null}
+          src={player ? ui.avatarUrl(player) : null}
           name={name ?? '?'}
         />
       )}
@@ -52,12 +51,12 @@ export default function PlayerRow({
           <span
             className={name === null ? 'text-sm italic text-(--mantine-color-dimmed)' : 'truncate text-sm font-medium'}
           >
-            {name ?? tExt('common.unknownPlayer', {})}
+            {name ?? text('common.unknownPlayer', {})}
           </span>
           {badges}
         </div>
         {id && (
-          <Tooltip label={tExt('common.copyId', {})}>
+          <Tooltip label={text('common.copyId', {})}>
             <CopyOnClick content={id} className='truncate text-left font-mono text-xs text-(--mantine-color-dimmed)'>
               {id}
             </CopyOnClick>

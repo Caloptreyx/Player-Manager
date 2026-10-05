@@ -1,7 +1,8 @@
 import { createContext, useContext } from 'react';
-import type { MutationResult } from '../api.ts';
-import type { Access, Method } from '../lib/access.ts';
-import type { Edition, Overview } from '../lib/players.ts';
+import { type GameText, type GameUi, gameText } from '../games/index.ts';
+import type { Access } from '../lib/access.ts';
+import type { Game, MutationResult, Overview } from '../lib/model.ts';
+import { useExtTranslations } from '../translations.ts';
 
 export interface ConfirmRequest {
   title: string;
@@ -16,11 +17,11 @@ export interface ConfirmRequest {
 
 export interface PlayerManager {
   serverUuid: string;
-  edition: Edition;
+  game: Game;
+  ui: GameUi;
   overview: Overview;
-  /** How list changes are carried out right now, null while starting/stopping. */
-  method: Method | null;
-  listAccess: Access;
+  /** Adding to and removing from the lists. */
+  editAccess: Access;
   kickAccess: Access;
   /** Runs a mutation, toasts the outcome and schedules the overview refetch; resolves to whether it succeeded. */
   run: (action: () => Promise<MutationResult>, success: string) => Promise<boolean>;
@@ -35,4 +36,9 @@ export function usePlayerManager(): PlayerManager {
   if (!context) throw new Error('usePlayerManager must be used inside the player manager page');
 
   return context;
+}
+
+export function useText(): GameText {
+  const { t } = useExtTranslations();
+  return gameText(t, usePlayerManager().ui);
 }

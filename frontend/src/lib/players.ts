@@ -1,74 +1,6 @@
-export const EDITIONS = ['java', 'bedrock'] as const;
-export type Edition = (typeof EDITIONS)[number];
+import type { Entry, ListKind, Method, OnlinePlayers, Overview, Player } from './model.ts';
 
-export const SERVER_STATES = ['offline', 'starting', 'stopping', 'running'] as const;
-export type ServerState = (typeof SERVER_STATES)[number];
-
-export const BEDROCK_LEVELS = ['operator', 'member', 'visitor'] as const;
-export type BedrockLevel = (typeof BEDROCK_LEVELS)[number];
-export type OperatorLevel = number | BedrockLevel;
-
-export interface Player {
-  name: string;
-  id: string | null;
-}
-
-export interface WhitelistEntry {
-  name: string;
-  id: string | null;
-  ignores_player_limit: boolean | null;
-}
-
-export interface Operator {
-  name: string | null;
-  id: string | null;
-  level: OperatorLevel;
-  bypasses_player_limit: boolean | null;
-}
-
-export interface Ban {
-  name: string;
-  id: string | null;
-  reason: string | null;
-  source: string | null;
-  created: string | null;
-  expires: string | null;
-}
-
-export interface IpBan {
-  ip: string;
-  reason: string | null;
-  source: string | null;
-  created: string | null;
-  expires: string | null;
-}
-
-export interface FileError {
-  file: string;
-  message: string;
-}
-
-export interface Overview {
-  edition: Edition | null;
-  state: ServerState;
-  online_mode: boolean | null;
-  whitelist_enabled: boolean | null;
-  max_players: number | null;
-  whitelist: WhitelistEntry[];
-  operators: Operator[];
-  bans: Ban[];
-  ip_bans: IpBan[];
-  known: Player[];
-  errors: FileError[];
-}
-
-export interface OnlinePlayers {
-  count: number;
-  max: number;
-  players: Player[];
-}
-
-/** Anything that names a player; operators on Bedrock may only carry an xuid. */
+/** Anything that names a player; Bedrock operators may only carry an xuid. */
 export interface PlayerRef {
   name: string | null;
   id: string | null;
@@ -84,27 +16,20 @@ const normalizeId = (id: string) => id.replaceAll('-', '').toLowerCase();
 export const samePlayer = (a: PlayerRef, b: PlayerRef): boolean =>
   a.id !== null && b.id !== null ? normalizeId(a.id) === normalizeId(b.id) : sameName(a.name, b.name);
 
-export interface PlayerStatus {
-  operator: Operator | null;
-  whitelisted: boolean;
-  banned: boolean;
-}
+/** The lists that hold players and get a badge on the rows of the other lists. */
+const PLAYER_LIST_KINDS = ['operators', 'whitelist', 'bans'] as const satisfies readonly ListKind[];
+type PlayerListKind = (typeof PLAYER_LIST_KINDS)[number];
 
-/** Cross-references a player with the overview lists, for the badges of every row. */
-export const playerStatus = (
-  overview: Pick<Overview, 'whitelist' | 'operators' | 'bans'>,
-  player: PlayerRef,
-): PlayerStatus => ({
-  operator: overview.operators.find((operator) => samePlayer(operator, player)) ?? null,
-  whitelisted: overview.whitelist.some((entry) => samePlayer(entry, player)),
-  banned: overview.bans.some((ban) => samePlayer(ban, player)),
-});
+/** The entry of the player on every player list the game has, for the cross-reference badges of a row. */
+export type PlayerStatus = Partial<Record<PlayerListKind, Entry>>;
 
-/** Java avatars come from mc-heads (uuid preferred, name otherwise); Bedrock has no public skin service. */
-export const avatarUrl = (edition: Edition, player: PlayerRef): string | null => {
-  if (edition !== 'java') return null;
-  const key = player.id ? normalizeId(player.id) : player.name;
-  return key ? `https://mc-heads.net/avatar/${encodeURIComponent(key)}/32` : null;
+export const playerStatus = (lists: Overview['lists'], player: PlayerRef): PlayerStatus => {
+  const status: PlayerStatus = {};
+  for (const kind of PLAYER_LIST_KINDS) {
+    const entry = lists[kind]?.find((candidate) => samePlayer(candidate, player));
+    if (entry) status[kind] = entry;
+  }
+  return status;
 };
 
 const collator = new Intl.Collator('en', { sensitivity: 'base', numeric: true });
@@ -150,5 +75,4 @@ export const withoutPlayer = (online: OnlinePlayers, name: string): OnlinePlayer
 
 /** Delay before refetching the overview: console commands make the server write its files asynchronously. */
 export const COMMAND_REFETCH_DELAY_MS = 1500;
-export const refetchDelay = (method: 'command' | 'file'): number =>
-  method === 'command' ? COMMAND_REFETCH_DELAY_MS : 0;
+export const refetchDelay = (method: Method): number => (method === 'command' ? COMMAND_REFETCH_DELAY_MS : 0);

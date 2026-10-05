@@ -2,7 +2,7 @@ import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import type { ReactNode } from 'react';
 import TextInput from '@/elements/input/TextInput.tsx';
-import { useExtTranslations } from '../translations.ts';
+import { useText } from './playerManager.ts';
 
 // toolbar (filter, info, actions) above a list of rows, with the empty and no-match states
 export default function ListPanel({
@@ -24,7 +24,7 @@ export default function ListPanel({
   /** The filtered rows. */
   children: ReactNode[];
 }) {
-  const { t: tExt } = useExtTranslations();
+  const text = useText();
 
   return (
     <div className='flex flex-col gap-2'>
@@ -33,7 +33,7 @@ export default function ListPanel({
           <TextInput
             size='xs'
             className='w-full sm:w-60'
-            placeholder={tExt('lists.filter', {})}
+            placeholder={text('lists.filter', {})}
             leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} />}
             value={filter}
             onChange={(e) => onFilterChange(e.currentTarget.value)}
@@ -46,7 +46,7 @@ export default function ListPanel({
       {total === 0 ? (
         <p className='py-6 text-center text-sm text-(--mantine-color-dimmed)'>{emptyText}</p>
       ) : children.length === 0 ? (
-        <p className='py-6 text-center text-sm text-(--mantine-color-dimmed)'>{tExt('lists.noMatches', {})}</p>
+        <p className='py-6 text-center text-sm text-(--mantine-color-dimmed)'>{text('lists.noMatches', {})}</p>
       ) : (
         <div className='flex flex-col divide-y divide-(--mantine-color-default-border)'>{children}</div>
       )}

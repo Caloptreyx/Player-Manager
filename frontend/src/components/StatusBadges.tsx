@@ -1,40 +1,43 @@
 import Badge from '@/elements/data-display/Badge.tsx';
-import type { OperatorLevel, PlayerStatus } from '../lib/players.ts';
+import type { ListKind } from '../lib/model.ts';
+import type { PlayerStatus } from '../lib/players.ts';
 import { useExtTranslations } from '../translations.ts';
-import { usePlayerManager } from './playerManager.ts';
+import { usePlayerManager, useText } from './playerManager.ts';
 
-export function LevelBadge({ level }: { level: OperatorLevel }) {
+export function LevelBadge({ level }: { level: string }) {
   const { t: tExt } = useExtTranslations();
+  const { ui } = usePlayerManager();
 
   return (
-    <Badge size='xs' variant='light' color={level === 'member' || level === 'visitor' ? 'gray' : 'violet'}>
-      {typeof level === 'number' ? tExt('badges.opLevel', { level }) : tExt(`badges.${level}`, {})}
+    <Badge size='xs' variant='light' color={ui.isOperatorLevel(level) ? 'violet' : 'gray'}>
+      {ui.levelLabel(tExt, level, 'badge')}
     </Badge>
   );
 }
 
 // cross-references of a row with the other lists; `except` leaves out the list the row belongs to
-export default function StatusBadges({
-  status,
-  except,
-}: {
-  status: PlayerStatus;
-  except?: 'operator' | 'whitelisted' | 'banned';
-}) {
-  const { t: tExt } = useExtTranslations();
-  const { edition } = usePlayerManager();
+export default function StatusBadges({ status, except }: { status: PlayerStatus; except?: ListKind }) {
+  const text = useText();
+  const operator = except === 'operators' ? undefined : status.operators;
 
   return (
     <>
-      {except !== 'operator' && status.operator && <LevelBadge level={status.operator.level} />}
-      {except !== 'whitelisted' && status.whitelisted && (
+      {operator &&
+        (operator.level === null ? (
+          <Badge size='xs' variant='light' color='violet'>
+            {text('lists.operators.badge', {})}
+          </Badge>
+        ) : (
+          <LevelBadge level={operator.level} />
+        ))}
+      {except !== 'whitelist' && status.whitelist && (
         <Badge size='xs' variant='light' color='green'>
-          {tExt(edition === 'bedrock' ? 'badges.allowlisted' : 'badges.whitelisted', {})}
+          {text('lists.whitelist.badge', {})}
         </Badge>
       )}
-      {except !== 'banned' && status.banned && (
+      {except !== 'bans' && status.bans && (
         <Badge size='xs' variant='light' color='red'>
-          {tExt('badges.banned', {})}
+          {text('lists.bans.badge', {})}
         </Badge>
       )}
     </>

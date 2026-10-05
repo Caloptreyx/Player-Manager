@@ -1,7 +1,7 @@
 pub mod post {
     use crate::{
-        context::{Context, Method, MutationResult},
-        edition::Edition,
+        context::{Actor, Context, authorize, unsupported},
+        model::MutationResult,
         validate,
     };
     use serde::Deserialize;
@@ -9,9 +9,9 @@ pub mod post {
         ApiError, GetState,
         models::{
             server::{GetServer, GetServerActivityLogger},
-            user::GetPermissionManager,
+            user::{GetPermissionManager, GetUser},
         },
-        response::ApiResponseResult,
+        response::{ApiResponse, ApiResponseResult},
     };
     use utoipa::ToSchema;
 
@@ -20,19 +20,6 @@ pub mod post {
         name: String,
         #[serde(default)]
         reason: Option<String>,
-    }
-
-    /// The `kick` command; Bedrock needs quotes around gamertags with spaces.
-    fn command(edition: Edition, name: &str, reason: Option<&str>) -> String {
-        let target = if edition == Edition::Bedrock && name.contains(' ') {
-            format!("\"{name}\"")
-        } else {
-            name.to_string()
-        };
-        match reason {
-            Some(reason) => format!("kick {target} {reason}"),
-            None => format!("kick {target}"),
-        }
     }
 
     /// Kicks an online player.
@@ -45,41 +32,32 @@ pub mod post {
     pub async fn route(
         state: GetState,
         permissions: GetPermissionManager,
+        user: GetUser,
         server: GetServer,
         activity_logger: GetServerActivityLogger,
         shared::Payload(data): shared::Payload<Payload>,
     ) -> ApiResponseResult {
         let ctx = Context::load(&state, &server).await?;
-        let edition = ctx.require_edition()?;
-        ctx.require_running()?;
-        permissions.has_server_permission("control.console")?;
-        validate::name(edition, &data.name)?;
+        let game = ctx.require_game()?;
+        let descriptor = game.descriptor(&ctx).await?;
+        let kick = descriptor
+            .kick
+            .ok_or_else(|| unsupported("kicking players"))?;
+        authorize(&kick.access, &permissions)?;
+        validate::player_name(descriptor.player_name.pattern, &data.name)?;
         let reason = validate::reason(data.reason.as_deref())?;
-
-        ctx.command(
-            &activity_logger,
-            &command(edition, &data.name, reason.as_deref()),
-        )
-        .await?;
-
-        MutationResult::respond(Method::Command, false)
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn quotes_bedrock_names_with_spaces() {
-            assert_eq!(
-                command(Edition::Bedrock, "Some Guy", Some("afk")),
-                "kick \"Some Guy\" afk"
-            );
-            assert_eq!(command(Edition::Bedrock, "Alex", None), "kick Alex");
-            assert_eq!(
-                command(Edition::Java, "Notch", Some("bye now")),
-                "kick Notch bye now"
-            );
+        if reason.is_some() && !kick.reason {
+            return Err(ApiResponse::error("a kick reason is not accepted"));
         }
+
+        let actor = Actor {
+            permissions: &permissions,
+            user: user.uuid,
+            activity_logger: &activity_logger,
+        };
+        let result = game
+            .kick(&ctx, &actor, &data.name, reason.as_deref())
+            .await?;
+        ApiResponse::new_serialized(result).ok()
     }
 }

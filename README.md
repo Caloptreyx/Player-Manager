@@ -1,9 +1,10 @@
 # Player Manager
 
-A [Calagopus Panel](https://calagopus.com) extension for managing the players of Minecraft servers, both
-**Java Edition** (vanilla, Paper/Spigot, Fabric, Forge and other servers that keep the vanilla player files)
-and **Bedrock Dedicated Server**. Open **Players** in the server sidebar to see who is online, kick or ban
-them, and edit the whitelist, operators and bans without touching the console or the JSON files.
+A [Calagopus Panel](https://calagopus.com) extension for managing the players of game servers. It is built
+around a small per-game module system; the supported games today are **Minecraft: Java Edition**
+(vanilla, Paper/Spigot, Fabric, Forge and other servers that keep the vanilla player files) and
+**Minecraft: Bedrock Dedicated Server**. Open **Players** in the server sidebar to see who is online, kick
+or ban them, and edit the whitelist, operators and bans without touching the console or the server files.
 
 Package name: `dev.caloptreyx.playermanager` · Requires panel `>=1.2.3`
 
@@ -19,8 +20,9 @@ Package name: `dev.caloptreyx.playermanager` · Requires panel `>=1.2.3`
 - **Name lookup**: players the server has seen before are suggested while typing. Java UUIDs come from
   `usercache.json`, the Mojang API, or the offline-mode UUID when `online-mode=false`. Bedrock XUIDs come
   from the allowlist, the console log (`Player connected`) or the GeyserMC API.
-- **Edition detection**: the extension recognises Java and Bedrock servers from their files, so the same
-  page works for both.
+- **Game detection**: the extension recognises the game from the server's files (and its egg/image name),
+  so the same page works for every supported game. Tabs, forms and actions follow what the detected game
+  supports.
 
 ## How changes are applied
 
@@ -35,7 +37,8 @@ While the server is starting or stopping, changes are refused. Operator levels a
 can only be chosen while a Java server is offline; the `op` command always uses the server's
 `op-permission-level`.
 
-Bedrock Dedicated Server has no ban list, so the ban tabs are only shown for Java servers.
+Bedrock Dedicated Server has no ban list, so Bedrock servers get a tab explaining that instead of the ban
+lists.
 
 Refreshing the online list runs `list` in the console (`minecraft:list uuids` on Java), so it shows up in
 the console output. The list is not polled in the background.
@@ -70,14 +73,28 @@ All routes live under `/api/client/servers/{server}/player-manager`:
 
 | Route | Purpose |
 |---|---|
-| `GET /` | Edition, state, properties, whitelist, operators, bans, known players |
-| `GET /online` | Online players (runs `list`) |
-| `POST`, `DELETE /whitelist` | Add or remove a whitelist entry |
-| `PUT /whitelist/enabled` | Turn the whitelist on or off |
-| `POST`, `DELETE /operators` | Add or remove an operator |
-| `POST`, `DELETE /bans` | Ban or pardon a player (Java) |
-| `POST`, `DELETE /ip-bans` | Ban or pardon an IP address (Java) |
+| `GET /` | Detected game and what it supports, server state, settings, its player lists, known players |
+| `GET /online` | Online players (Minecraft: runs `list`) |
+| `POST`, `DELETE /lists/{kind}` | Add or remove an entry; `kind` is `whitelist`, `operators`, `bans` or `ip_bans` |
+| `PUT /whitelist` | Turn the whitelist on or off |
 | `POST /kick` | Kick an online player |
+
+`GET /` returns a `game` descriptor: its id and family, the lists it has (with the fields each list
+accepts in the current server state, such as operator levels or a ban reason), the name and id patterns
+used for validation, and for every action the permissions it needs right now. The frontend renders from
+that descriptor, so it needs no changes for a game whose wording fits the defaults.
+
+## Adding a game
+
+1. Backend: add a module under `src/games/` that implements the `Game` trait (`src/games/mod.rs`):
+   a detection score from the server's root files and egg/image name, the descriptor (lists,
+   patterns, capabilities), and the overview, online list and list/whitelist/kick actions it supports.
+   Unsupported actions keep the trait's default implementations. Register it in `GAMES`.
+2. Frontend (optional): add `frontend/src/games/<game>.ts` and register it in
+   `frontend/src/games/index.ts` for a display name, avatars, wording overrides and notes. Without it the
+   page uses generic wording and letter avatars.
+3. If the game needs a list that is not one of the existing kinds, add the kind to `ListKind` on both
+   sides.
 
 ## Development
 

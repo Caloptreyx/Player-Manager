@@ -4,37 +4,31 @@ import ActionIcon from '@/elements/buttons/ActionIcon.tsx';
 import Button from '@/elements/buttons/Button.tsx';
 import Tooltip from '@/elements/overlays/Tooltip.tsx';
 import type { Access } from '../lib/access.ts';
-import { useExtTranslations } from '../translations.ts';
+import { useText } from './playerManager.ts';
 
 /** Hidden when the user can never do it, disabled with the reason as tooltip while blocked. */
-function useGate(access: Access | undefined, disabledReason: string | null | undefined) {
-  const { t: tExt } = useExtTranslations();
-  if (access && !access.visible) return { hidden: true, reason: null };
+function useGate(access: Access) {
+  const text = useText();
+  if (!access.visible) return { hidden: true, reason: null };
 
-  return {
-    hidden: false,
-    reason: disabledReason ?? (access?.blocker ? tExt(`blockers.${access.blocker}`, {}) : null),
-  };
+  return { hidden: false, reason: access.blocker ? text(`blockers.${access.blocker}`, {}) : null };
 }
 
 export default function RowAction({
   icon,
   label,
   access,
-  disabledReason,
   danger = false,
   onClick,
 }: {
   icon: IconDefinition;
   label: string;
-  access?: Access;
-  /** Disables the action for a reason specific to this row. */
-  disabledReason?: string | null;
+  access: Access;
   /** Turns red on hover. */
   danger?: boolean;
   onClick: () => void;
 }) {
-  const { hidden, reason } = useGate(access, disabledReason);
+  const { hidden, reason } = useGate(access);
   if (hidden) return null;
 
   return (
@@ -67,7 +61,7 @@ export function GatedButton({
   access: Access;
   onClick: () => void;
 }) {
-  const { hidden, reason } = useGate(access, null);
+  const { hidden, reason } = useGate(access);
   if (hidden) return null;
 
   const button = (

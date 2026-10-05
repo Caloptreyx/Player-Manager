@@ -5,8 +5,7 @@ import { Modal, ModalFooter } from '@/elements/modals/Modal.tsx';
 import Text from '@/elements/typography/Text.tsx';
 import { useTranslations } from '@/providers/TranslationProvider.tsx';
 import { validateReason } from '../lib/validation.ts';
-import { useExtTranslations } from '../translations.ts';
-import type { ConfirmRequest } from './playerManager.ts';
+import { type ConfirmRequest, useText } from './playerManager.ts';
 
 // confirmation of a destructive action (kick, ban, remove), optionally asking for a reason; stays open when
 // the action fails so the user can retry
@@ -20,7 +19,7 @@ export default function ConfirmActionModal({
   onClose: () => void;
 }) {
   const { t } = useTranslations();
-  const { t: tExt } = useExtTranslations();
+  const text = useText();
   const [reason, setReason] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -47,10 +46,10 @@ export default function ConfirmActionModal({
         <Text>{request?.content}</Text>
         {request?.withReason && (
           <TextInput
-            label={tExt('form.reason', {})}
-            placeholder={tExt('form.reasonPlaceholder', {})}
+            label={text('form.reason', {})}
+            placeholder={text('form.reasonPlaceholder', {})}
             value={reason}
-            error={reasonError && tExt(`errors.${reasonError}`, {})}
+            error={reasonError && text(`errors.${reasonError}`, {})}
             data-autofocus
             onChange={(e) => setReason(e.currentTarget.value)}
           />

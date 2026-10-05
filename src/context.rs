@@ -1,14 +1,14 @@
 //! What every route needs about a server: its Wings connection, power state, root files and
-//! edition, plus the shared response types, the mutation strategy and id resolution.
+//! detected game; file and console access logged like the panel's own routes; capability
+//! enforcement. Nothing here knows about a particular game.
 use crate::{
     console,
-    edition::{self, Edition},
     files::Wings,
-    lists::{self, Entry},
-    lookup, properties, validate,
+    games::{self, Game},
+    lists,
+    model::{Blocked, Capability, ServerState},
 };
 use axum::http::StatusCode;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use shared::{
     State,
@@ -16,86 +16,18 @@ use shared::{
         server::{Server, ServerActivityLogger},
         user::PermissionManager,
     },
-    response::{ApiResponse, ApiResponseResult},
+    response::ApiResponse,
 };
-use std::collections::{HashMap, HashSet};
-use utoipa::ToSchema;
+use std::{collections::HashSet, time::Duration};
+use tokio::time::Instant;
 
-pub const PROPERTIES: &str = "server.properties";
-pub const JAVA_WHITELIST: &str = "whitelist.json";
-pub const JAVA_OPS: &str = "ops.json";
-pub const JAVA_BANS: &str = "banned-players.json";
-pub const JAVA_IP_BANS: &str = "banned-ips.json";
-pub const JAVA_USERCACHE: &str = "usercache.json";
-pub const BEDROCK_ALLOWLIST: &str = "allowlist.json";
-pub const BEDROCK_LEGACY_ALLOWLIST: &str = "whitelist.json";
-pub const BEDROCK_PERMISSIONS: &str = "permissions.json";
-
-/// The ban reason servers store when none is given.
-pub const BAN_REASON: &str = "Banned by an operator.";
-
-/// Console lines searched for Bedrock `Player connected` lines.
-const KNOWN_LOG_LINES: u64 = 1000;
-
-#[derive(ToSchema, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerState {
-    Offline,
-    Starting,
-    Stopping,
-    Running,
-}
-
-impl From<wings_api::ServerState> for ServerState {
-    fn from(state: wings_api::ServerState) -> Self {
-        match state {
-            wings_api::ServerState::Offline => Self::Offline,
-            wings_api::ServerState::Starting => Self::Starting,
-            wings_api::ServerState::Stopping => Self::Stopping,
-            wings_api::ServerState::Running => Self::Running,
-        }
-    }
-}
-
-#[derive(ToSchema, Serialize, Clone, Debug, PartialEq, Eq)]
-pub struct Player {
-    pub name: String,
-    /// Dashed lowercase UUID (Java) or XUID (Bedrock).
-    pub id: Option<String>,
-}
-
-/// A Java op level (1-4) or a Bedrock permission level (`operator`, `member`, `visitor`).
-#[derive(ToSchema, Serialize, Deserialize, Clone)]
-#[serde(untagged)]
-pub enum Level {
-    Number(u8),
-    Name(String),
-}
-
-pub const BEDROCK_LEVELS: [&str; 3] = ["operator", "member", "visitor"];
-
-#[derive(ToSchema, Serialize, Clone, Copy, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum Method {
-    Command,
-    File,
-}
-
-#[derive(ToSchema, Serialize)]
-pub struct MutationResult {
-    pub method: Method,
-    pub restart_required: bool,
-}
-
-impl MutationResult {
-    pub fn respond(method: Method, restart_required: bool) -> ApiResponseResult {
-        ApiResponse::new_serialized(Self {
-            method,
-            restart_required,
-        })
-        .ok()
-    }
-}
+/// Console lines read for player suggestions.
+const LOG_LINES: u64 = 1000;
+/// Console lines compared before and after sending a command that expects an answer.
+const TAIL_LINES: u64 = 100;
+const POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// How long one command may take to answer.
+const ATTEMPT_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub fn conflict(message: &str) -> ApiResponse {
     ApiResponse::error(message).with_status(StatusCode::CONFLICT)
@@ -109,89 +41,48 @@ pub fn unprocessable(message: impl AsRef<str>) -> ApiResponse {
     ApiResponse::error(message).with_status(StatusCode::UNPROCESSABLE_ENTITY)
 }
 
-pub fn java_only() -> ApiResponse {
-    ApiResponse::error("Bedrock servers have no ban list")
+/// A feature the server's game does not have.
+pub fn unsupported(feature: &str) -> ApiResponse {
+    ApiResponse::error(format!("{feature} is not supported for this game"))
 }
 
-/// Whether the entry's `uuid` is `uuid` (dashed lowercase), however it is written.
-pub fn uuid_is(entry: &Entry, uuid: &str) -> bool {
-    lists::string(entry, "uuid")
-        .and_then(validate::java_id)
-        .is_some_and(|found| found == uuid)
+pub fn list_not_supported() -> ApiResponse {
+    ApiResponse::error("list not supported").with_status(StatusCode::NOT_FOUND)
 }
 
-pub fn xuid_is(entry: &Entry, xuid: &str) -> bool {
-    lists::text(entry, "xuid").is_some_and(|found| found == xuid)
-}
-
-/// `created` of a new ban entry, in the server's `yyyy-MM-dd HH:mm:ss Z` format.
-pub fn ban_created() -> String {
-    chrono::Utc::now()
-        .format("%Y-%m-%d %H:%M:%S +0000")
-        .to_string()
-}
-
-/// Players of a Java `usercache.json`.
-pub fn usercache_players(entries: &[Value]) -> Vec<Player> {
-    lists::objects(entries)
-        .filter_map(|entry| {
-            Some(Player {
-                name: lists::string(entry, "name")?.to_string(),
-                id: lists::string(entry, "uuid").and_then(validate::java_id),
-            })
-        })
-        .collect()
-}
-
-/// Bedrock players with a known XUID: allowlist entries, then console join lines (newer
-/// joins win); one entry per name, ignoring case.
-pub fn bedrock_known(allowlist: &[Value], log_lines: &[String]) -> Vec<Player> {
-    let from_allowlist = lists::objects(allowlist).filter_map(|entry| {
-        let xuid = lists::text(entry, "xuid").filter(|xuid| validate::bedrock_id(xuid))?;
-        Some((lists::string(entry, "name")?.to_string(), xuid))
-    });
-    let mut players: Vec<Player> = Vec::new();
-    let mut index: HashMap<String, usize> = HashMap::new();
-    for (name, xuid) in from_allowlist.chain(console::connected_players(log_lines)) {
-        match index.get(&name.to_ascii_lowercase()) {
-            Some(&position) => {
-                players[position] = Player {
-                    name,
-                    id: Some(xuid),
-                }
-            }
-            None => {
-                index.insert(name.to_ascii_lowercase(), players.len());
-                players.push(Player {
-                    name,
-                    id: Some(xuid),
-                });
-            }
+/// Checks a capability of the game's descriptor: 409 when the server state forbids it, the
+/// panel's permission error when a required permission is missing.
+pub fn authorize(
+    capability: &Capability,
+    permissions: &PermissionManager,
+) -> Result<(), ApiResponse> {
+    match capability.blocked {
+        Some(Blocked::Transition) => {
+            return Err(conflict(
+                "the server is starting or stopping, try again in a moment",
+            ));
         }
+        Some(Blocked::NotRunning) => return Err(conflict("the server is not running")),
+        None => {}
     }
-    players
+    for permission in capability.requires {
+        permissions.has_server_permission(permission)?;
+    }
+    Ok(())
 }
 
-/// The XUID of `name` among `known` players.
-pub fn known_xuid(known: &[Player], name: &str) -> Option<String> {
-    known
-        .iter()
-        .find(|player| player.name.eq_ignore_ascii_case(name))
-        .and_then(|player| player.id.clone())
-}
-
-/// The name of the known player with XUID `xuid`.
-pub fn known_name(known: &[Player], xuid: &str) -> Option<String> {
-    known
-        .iter()
-        .find(|player| player.id.as_deref() == Some(xuid))
-        .map(|player| player.name.clone())
+/// Who acts: permissions for optional reads, the user files are written as and the activity
+/// log of the server.
+pub struct Actor<'a> {
+    pub permissions: &'a PermissionManager,
+    pub user: uuid::Uuid,
+    pub activity_logger: &'a ServerActivityLogger,
 }
 
 pub struct Context<'a> {
-    pub wings: Wings<'a>,
+    wings: Wings<'a>,
     pub state: ServerState,
-    pub edition: Option<Edition>,
+    pub game: Option<&'static dyn Game>,
     /// Names of the files (not directories) in the server root.
     root: HashSet<String>,
     max_size: u64,
@@ -207,7 +98,7 @@ impl<'a> Context<'a> {
             .map(|entry| entry.name.to_string())
             .collect();
         let files: Vec<&str> = root.iter().map(String::as_str).collect();
-        let edition = edition::detect(&files, &[server.egg.name.as_str(), server.image.as_str()]);
+        let game = games::detect(&files, &[server.egg.name.as_str(), server.image.as_str()]);
         let max_size = state
             .settings
             .get_as(|settings| settings.server.max_file_manager_view_size)
@@ -216,7 +107,7 @@ impl<'a> Context<'a> {
         Ok(Self {
             wings,
             state: power_state.into(),
-            edition,
+            game,
             root,
             max_size,
         })
@@ -226,54 +117,9 @@ impl<'a> Context<'a> {
         self.root.contains(name)
     }
 
-    pub fn require_edition(&self) -> Result<Edition, ApiResponse> {
-        self.edition
-            .ok_or_else(|| ApiResponse::error("this server was not detected as a Minecraft server"))
-    }
-
-    /// 409 while the server is starting or stopping.
-    pub fn require_settled(&self) -> Result<(), ApiResponse> {
-        match self.state {
-            ServerState::Starting | ServerState::Stopping => Err(conflict(
-                "the server is starting or stopping, try again in a moment",
-            )),
-            ServerState::Offline | ServerState::Running => Ok(()),
-        }
-    }
-
-    pub fn require_running(&self) -> Result<(), ApiResponse> {
-        if self.state == ServerState::Running {
-            Ok(())
-        } else {
-            Err(conflict("the server is not running"))
-        }
-    }
-
-    /// How a list mutation is applied, after checking the permissions it needs: commands on
-    /// a running Java server, file edits otherwise (plus a reload command on a running
-    /// Bedrock server).
-    pub fn plan(&self, permissions: &PermissionManager) -> Result<(Edition, Method), ApiResponse> {
-        let edition = self.require_edition()?;
-        self.require_settled()?;
-        let running = self.state == ServerState::Running;
-        let method = match edition {
-            Edition::Java if running => {
-                permissions.has_server_permission("control.console")?;
-                Method::Command
-            }
-            Edition::Java => {
-                permissions.has_server_permission("files.create")?;
-                Method::File
-            }
-            Edition::Bedrock => {
-                permissions.has_server_permission("files.create")?;
-                if running {
-                    permissions.has_server_permission("control.console")?;
-                }
-                Method::File
-            }
-        };
-        Ok((edition, method))
+    pub fn require_game(&self) -> Result<&'static dyn Game, ApiResponse> {
+        self.game
+            .ok_or_else(|| ApiResponse::error("no supported game was detected on this server"))
     }
 
     async fn read(&self, name: &str) -> Result<Option<Vec<u8>>, ApiResponse> {
@@ -283,7 +129,7 @@ impl<'a> Context<'a> {
         self.wings.read(&format!("/{name}"), self.max_size).await
     }
 
-    /// The file as text for editing (422 when it is not UTF-8); `None` when missing.
+    /// The root file as text for editing (422 when it is not UTF-8); `None` when missing.
     pub async fn read_text(&self, name: &str) -> Result<Option<String>, ApiResponse> {
         match self.read(name).await? {
             None => Ok(None),
@@ -293,7 +139,7 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// The file as text for display; `None` when missing.
+    /// The root file as text for display; `None` when missing.
     pub async fn read_text_lossy(&self, name: &str) -> Result<Option<String>, ApiResponse> {
         Ok(self
             .read(name)
@@ -326,21 +172,24 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Writes a root file as `user` and logs it like the panel's file write route.
+    /// Writes a root file as the actor and logs it like the panel's file write route.
     pub async fn write(
         &self,
         name: &str,
         content: String,
-        user: uuid::Uuid,
-        activity_logger: &ServerActivityLogger,
+        actor: &Actor<'_>,
     ) -> Result<(), ApiResponse> {
         if content.len() as u64 > self.max_size {
             return Err(ApiResponse::error(format!("{name} would be too large"))
                 .with_status(StatusCode::PAYLOAD_TOO_LARGE));
         }
         let path = format!("/{name}");
-        let revision_id = self.wings.write(&path, user, content.into_bytes()).await?;
-        activity_logger
+        let revision_id = self
+            .wings
+            .write(&path, actor.user, content.into_bytes())
+            .await?;
+        actor
+            .activity_logger
             .log(
                 "server:file.write",
                 serde_json::json!({ "file": path, "revision_id": revision_id }),
@@ -353,50 +202,47 @@ impl<'a> Context<'a> {
         &self,
         name: &str,
         entries: &[Value],
-        user: uuid::Uuid,
-        activity_logger: &ServerActivityLogger,
+        actor: &Actor<'_>,
     ) -> Result<(), ApiResponse> {
-        self.write(name, lists::render(entries), user, activity_logger)
-            .await
+        self.write(name, lists::render(entries), actor).await
     }
 
-    pub async fn command(
-        &self,
-        activity_logger: &ServerActivityLogger,
-        command: &str,
-    ) -> Result<(), ApiResponse> {
-        self.wings.command(activity_logger, command).await
+    pub async fn command(&self, actor: &Actor<'_>, command: &str) -> Result<(), ApiResponse> {
+        self.wings.command(actor.activity_logger, command).await
     }
 
-    /// Sends `command` when the server is running (Bedrock list reloads).
-    pub async fn reload(
+    /// Sends `command` only when the server is running (e.g. making it reread a file).
+    pub async fn command_if_running(
         &self,
-        activity_logger: &ServerActivityLogger,
+        actor: &Actor<'_>,
         command: &str,
     ) -> Result<(), ApiResponse> {
         if self.state == ServerState::Running {
-            self.command(activity_logger, command).await?;
+            self.command(actor, command).await?;
         }
         Ok(())
     }
 
-    /// Bedrock's allowlist file: `allowlist.json`, or the legacy `whitelist.json` when only
-    /// it exists.
-    pub fn bedrock_allowlist(&self) -> &'static str {
-        if !self.has(BEDROCK_ALLOWLIST) && self.has(BEDROCK_LEGACY_ALLOWLIST) {
-            BEDROCK_LEGACY_ALLOWLIST
-        } else {
-            BEDROCK_ALLOWLIST
-        }
-    }
+    /// Sends `command` and watches the console tail until `parse` finds its answer among the
+    /// lines printed after it; `None` when none came in time.
+    pub async fn ask<T>(
+        &self,
+        actor: &Actor<'_>,
+        command: &str,
+        parse: fn(&[String]) -> Option<T>,
+    ) -> Result<Option<T>, ApiResponse> {
+        let baseline = console::split_lines(&self.wings.logs(TAIL_LINES).await?);
+        self.command(actor, command).await?;
 
-    /// The command that makes a running Bedrock server reread its allowlist file.
-    pub fn bedrock_allowlist_reload(&self) -> &'static str {
-        if self.bedrock_allowlist() == BEDROCK_LEGACY_ALLOWLIST {
-            "whitelist reload"
-        } else {
-            "allowlist reload"
+        let deadline = Instant::now() + ATTEMPT_TIMEOUT;
+        while Instant::now() < deadline {
+            tokio::time::sleep(POLL_INTERVAL).await;
+            let current = console::split_lines(&self.wings.logs(TAIL_LINES).await?);
+            if let Some(answer) = parse(console::new_lines(&baseline, &current)) {
+                return Ok(Some(answer));
+            }
         }
+        Ok(None)
     }
 
     /// The console tail as clean lines, only for users who may read the console; failures
@@ -408,118 +254,12 @@ impl<'a> Context<'a> {
         {
             return Vec::new();
         }
-        match self.wings.logs(KNOWN_LOG_LINES).await {
+        match self.wings.logs(LOG_LINES).await {
             Ok(log) => console::split_lines(&log),
             Err(_) => {
                 tracing::warn!("could not read the console log for known players");
                 Vec::new()
             }
         }
-    }
-
-    /// Known Bedrock players from the allowlist file (when it parses) and the console.
-    pub async fn bedrock_known_players(
-        &self,
-        permissions: &PermissionManager,
-    ) -> Result<Vec<Player>, ApiResponse> {
-        let allowlist = self
-            .read_list(self.bedrock_allowlist())
-            .await?
-            .and_then(Result::ok)
-            .unwrap_or_default();
-        Ok(bedrock_known(
-            &allowlist,
-            &self.log_lines(permissions).await,
-        ))
-    }
-
-    /// `(name, dashed uuid)` of a Java player for file edits: the given id, `usercache.json`,
-    /// GeyserMC for Floodgate names, then Mojang, or the offline UUID when `online-mode` is
-    /// false.
-    pub async fn resolve_java(
-        &self,
-        name: &str,
-        id: Option<String>,
-    ) -> Result<(String, String), ApiResponse> {
-        if let Some(id) = id {
-            return Ok((name.to_string(), id));
-        }
-        if let Some(Ok(cache)) = self.read_list(JAVA_USERCACHE).await?
-            && let Some(player) = usercache_players(&cache)
-                .into_iter()
-                .find(|player| player.name.eq_ignore_ascii_case(name))
-            && let Some(uuid) = player.id
-        {
-            return Ok((player.name, uuid));
-        }
-        if let Some(gamertag) = validate::floodgate_gamertag(name) {
-            // Floodgate writes the spaces of gamertags as underscores
-            let xuid = lookup::geyser_xuid(&gamertag.replace('_', " "))
-                .await?
-                .ok_or_else(player_not_found)?;
-            let uuid = lookup::floodgate_uuid(&xuid).ok_or_else(player_not_found)?;
-            return Ok((name.to_string(), uuid));
-        }
-        let online_mode = self
-            .read_text_lossy(PROPERTIES)
-            .await?
-            .and_then(|content| properties::get_bool(&content, "online-mode"));
-        if online_mode == Some(false) {
-            return Ok((name.to_string(), lookup::offline_uuid(name)));
-        }
-        let (uuid, canonical) = lookup::mojang_profile(name)
-            .await?
-            .ok_or_else(player_not_found)?;
-        Ok((canonical, uuid))
-    }
-
-    /// The XUID of a Bedrock player: the given id, known players, then GeyserMC.
-    pub async fn resolve_xuid(
-        &self,
-        name: &str,
-        id: Option<String>,
-        known: &[Player],
-    ) -> Result<String, ApiResponse> {
-        if let Some(id) = id {
-            return Ok(id);
-        }
-        if let Some(xuid) = known_xuid(known, name) {
-            return Ok(xuid);
-        }
-        lookup::geyser_xuid(name).await?.ok_or_else(|| {
-            unprocessable("XUID unknown, let the player join once or enter the XUID")
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn known_bedrock_players_prefer_newer_joins() {
-        let allowlist = lists::parse(
-            r#"[{"name":"Alex","xuid":"1"},{"name":"NoXuid"},{"name":"Some Guy","xuid":2}]"#,
-        )
-        .unwrap();
-        let log = console::split_lines(
-            "[2026-01-01 12:00:00:000 INFO] Player connected: alex, xuid: 3\nPlayer connected: Steve, xuid: 4",
-        );
-        let known = bedrock_known(&allowlist, &log);
-        let player = |name: &str, id: &str| Player {
-            name: name.into(),
-            id: Some(id.into()),
-        };
-        assert_eq!(
-            known,
-            vec![
-                player("alex", "3"),
-                player("Some Guy", "2"),
-                player("Steve", "4")
-            ]
-        );
-        assert_eq!(known_xuid(&known, "ALEX").as_deref(), Some("3"));
-        assert_eq!(known_xuid(&known, "NoXuid"), None);
-        assert_eq!(known_name(&known, "2").as_deref(), Some("Some Guy"));
     }
 }

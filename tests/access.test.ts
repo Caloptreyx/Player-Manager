@@ -1,82 +1,63 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import {
-  type Granted,
-  kickAccess,
-  listAccess,
-  mutationMethod,
-  onlineAccess,
-  whitelistToggleAccess,
-} from '../frontend/src/lib/access.ts';
+import { capabilityAccess, editHint } from '../frontend/src/lib/access.ts';
+import { bedrockGame, javaGame } from './fixtures.ts';
 
-const all: Granted = { console: true, readConsole: true, writeFiles: true };
-const consoleOnly: Granted = { console: true, readConsole: true, writeFiles: false };
-const filesOnly: Granted = { console: false, readConsole: false, writeFiles: true };
+const all = new Set(['control.console', 'control.read-console', 'files.create']);
+const consoleOnly = new Set(['control.console', 'control.read-console']);
+const filesOnly = new Set(['files.create']);
 
-describe('mutationMethod', () => {
-  test('java uses commands while running and files while offline', () => {
-    assert.equal(mutationMethod('java', 'running'), 'command');
-    assert.equal(mutationMethod('java', 'offline'), 'file');
+describe('capabilityAccess', () => {
+  test('java edits need the console while running and file writes while offline', () => {
+    assert.deepEqual(capabilityAccess(javaGame('running').edit, consoleOnly), { visible: true, blocker: null });
+    assert.deepEqual(capabilityAccess(javaGame('offline').edit, consoleOnly), { visible: true, blocker: 'noFiles' });
+    assert.deepEqual(capabilityAccess(javaGame('running').edit, filesOnly), { visible: true, blocker: 'noConsole' });
+    assert.deepEqual(capabilityAccess(javaGame('offline').edit, filesOnly), { visible: true, blocker: null });
   });
 
-  test('bedrock always edits files', () => {
-    assert.equal(mutationMethod('bedrock', 'running'), 'file');
-    assert.equal(mutationMethod('bedrock', 'offline'), 'file');
+  test('bedrock edits report the first missing permission and hide without file writes', () => {
+    assert.deepEqual(capabilityAccess(bedrockGame('offline').edit, filesOnly), { visible: true, blocker: null });
+    assert.deepEqual(capabilityAccess(bedrockGame('running').edit, filesOnly), { visible: true, blocker: 'noConsole' });
+    assert.equal(capabilityAccess(bedrockGame('running').edit, consoleOnly).visible, false);
+    assert.equal(capabilityAccess(bedrockGame('running').edit, new Set()).blocker, 'noFiles');
   });
 
-  test('nothing runs while starting or stopping', () => {
-    for (const state of ['starting', 'stopping'] as const) {
-      assert.equal(mutationMethod('java', state), null);
-      assert.equal(mutationMethod('bedrock', state), null);
-    }
-  });
-});
-
-describe('listAccess', () => {
-  test('java needs the console while running and file writes while offline', () => {
-    assert.deepEqual(listAccess('java', 'running', consoleOnly), { visible: true, blocker: null });
-    assert.deepEqual(listAccess('java', 'offline', consoleOnly), { visible: true, blocker: 'noFiles' });
-    assert.deepEqual(listAccess('java', 'running', filesOnly), { visible: true, blocker: 'noConsole' });
-    assert.deepEqual(listAccess('java', 'offline', filesOnly), { visible: true, blocker: null });
+  test('the server state blocks before any permission', () => {
+    assert.deepEqual(capabilityAccess(javaGame('starting').edit, all), { visible: true, blocker: 'transition' });
+    assert.deepEqual(capabilityAccess(javaGame('starting').edit, new Set()), { visible: false, blocker: 'transition' });
+    assert.equal(capabilityAccess(javaGame('offline').kick, all).blocker, 'notRunning');
+    assert.equal(capabilityAccess(javaGame('offline').online, all).blocker, 'notRunning');
+    assert.equal(capabilityAccess(javaGame('starting').online, all).blocker, 'transition');
   });
 
-  test('bedrock needs file writes always and the console for the reload while running', () => {
-    assert.deepEqual(listAccess('bedrock', 'offline', filesOnly), { visible: true, blocker: null });
-    assert.deepEqual(listAccess('bedrock', 'running', filesOnly), { visible: true, blocker: 'noConsole' });
-    assert.equal(listAccess('bedrock', 'running', consoleOnly).visible, false);
+  test('visible with any of visible_with, blocked by whichever required permission is missing', () => {
+    const online = javaGame('running').online;
+    assert.deepEqual(capabilityAccess(online, new Set(['control.console'])), { visible: true, blocker: 'noReadConsole' });
+    assert.equal(capabilityAccess(online, filesOnly).visible, false);
+    assert.equal(capabilityAccess(javaGame('running').kick, filesOnly).visible, false);
   });
 
-  test('transitions block even with every permission', () => {
-    assert.deepEqual(listAccess('java', 'stopping', all), { visible: true, blocker: 'transition' });
+  test('permissions without a dedicated text fall back to the generic blocker', () => {
+    const capability = { requires: ['files.update'], visible_with: ['files.update'], blocked: null };
+    assert.deepEqual(capabilityAccess(capability, new Set()), { visible: false, blocker: 'noPermission' });
   });
 
-  test('hidden when no permission could ever apply', () => {
-    const none: Granted = { console: false, readConsole: true, writeFiles: false };
-    assert.equal(listAccess('java', 'offline', none).visible, false);
+  test('a capability the game lacks is hidden', () => {
+    assert.deepEqual(capabilityAccess(null, all), { visible: false, blocker: null });
   });
 });
 
-describe('whitelistToggleAccess', () => {
-  test('a running bedrock server only edits server.properties', () => {
-    assert.deepEqual(whitelistToggleAccess('bedrock', 'running', filesOnly), { visible: true, blocker: null });
+describe('editHint', () => {
+  test('follows the method, telling a file edit with a console reload apart', () => {
+    assert.equal(editHint(javaGame('running').edit), 'command');
+    assert.equal(editHint(javaGame('offline').edit), 'file');
+    assert.equal(editHint(bedrockGame('running').edit), 'fileReload');
+    assert.equal(editHint(bedrockGame('offline').edit), 'file');
   });
 
-  test('a running java server needs the console', () => {
-    assert.deepEqual(whitelistToggleAccess('java', 'running', filesOnly), { visible: true, blocker: 'noConsole' });
-    assert.deepEqual(whitelistToggleAccess('java', 'offline', filesOnly), { visible: true, blocker: null });
-  });
-});
-
-describe('kick and online', () => {
-  test('only while running', () => {
-    assert.equal(kickAccess('running', all).blocker, null);
-    assert.equal(kickAccess('offline', all).blocker, 'notRunning');
-    assert.equal(onlineAccess('starting', all).blocker, 'transition');
-    assert.equal(onlineAccess('offline', all).blocker, 'notRunning');
-  });
-
-  test('listing online players needs to send and read the console', () => {
-    assert.equal(onlineAccess('running', { ...all, readConsole: false }).visible, false);
-    assert.equal(kickAccess('running', filesOnly).visible, false);
+  test('blocked edits explain the state; no edits, no hint', () => {
+    assert.equal(editHint(javaGame('starting').edit), 'transition');
+    assert.equal(editHint({ requires: [], visible_with: [], blocked: 'not_running', method: 'command' }), 'notRunning');
+    assert.equal(editHint(null), null);
   });
 });

@@ -48,7 +48,7 @@ pub async fn mojang_profile(name: &str) -> Result<Option<(String, String)>, ApiR
         .json()
         .await
         .map_err(|err| upstream("Mojang", err))?;
-    let id = crate::validate::java_id(&profile.id)
+    let id = super::java_id(&profile.id)
         .ok_or_else(|| upstream("Mojang", format_args!("invalid id {:?}", profile.id)))?;
     Ok(Some((id, profile.name)))
 }
@@ -77,7 +77,7 @@ pub async fn geyser_xuid(gamertag: &str) -> Result<Option<String>, ApiResponse> 
         Some(serde_json::Value::String(xuid)) => Some(xuid.clone()),
         _ => None,
     };
-    Ok(xuid.filter(|xuid| crate::validate::bedrock_id(xuid)))
+    Ok(xuid.filter(|xuid| super::XUID.is_match(xuid)))
 }
 
 /// The UUID an offline-mode Java server gives `name`: Java's

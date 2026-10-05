@@ -17,25 +17,31 @@ import Button from '@/elements/buttons/Button.tsx';
 import Alert from '@/elements/feedback/Alert.tsx';
 import EmptyState from '@/elements/feedback/EmptyState.tsx';
 import Spinner from '@/elements/feedback/Spinner.tsx';
-import { addBan, addOperator, addToWhitelist, kickPlayer, removeFromWhitelist, removeOperator } from '../api.ts';
+import { addToList, kickPlayer, removeFromList } from '../api.ts';
 import type { Access } from '../lib/access.ts';
-import { matchesFilter, type OnlinePlayers, type Player, playerStatus, sortBy } from '../lib/players.ts';
-import { useExtTranslations } from '../translations.ts';
+import { addBody, removeBody } from '../lib/lists.ts';
+import type { ListKind, OnlinePlayers, Player } from '../lib/model.ts';
+import { matchesFilter, playerStatus, sortBy } from '../lib/players.ts';
 import ListPanel from './ListPanel.tsx';
 import PlayerRow from './PlayerRow.tsx';
-import { usePlayerManager } from './playerManager.ts';
+import { usePlayerManager, useText } from './playerManager.ts';
 import RowAction from './RowAction.tsx';
 import StatusBadges from './StatusBadges.tsx';
 
+// the actions of a row follow what the game supports: whitelist and operator toggles, ban, kick
 function OnlineRow({ player, onKicked }: { player: Player; onKicked: (name: string) => void }) {
-  const { t: tExt } = useExtTranslations();
-  const { serverUuid, edition, overview, listAccess, kickAccess, run, confirm } = usePlayerManager();
-  const bedrock = edition === 'bedrock';
-  const status = playerStatus(overview, player);
-  const { name } = player;
-  const id = player.id ?? undefined;
+  const text = useText();
+  const { serverUuid, game, ui, overview, editAccess, kickAccess, run, confirm } = usePlayerManager();
+  const status = playerStatus(overview.lists, player);
+  const { name, id } = player;
+  const spec = (kind: ListKind) => game.lists.find((list) => list.kind === kind);
+  const whitelist = spec('whitelist');
+  const operators = spec('operators');
+  const bans = spec('bans');
+  const { kick } = game;
+  const { whitelist: listed, operators: operator, bans: banned } = status;
   // Bedrock members and visitors are in permissions.json too, but only operators count as opped
-  const opped = status.operator !== null && status.operator.level !== 'member' && status.operator.level !== 'visitor';
+  const opped = operator !== undefined && (operator.level === null || ui.isOperatorLevel(operator.level));
 
   return (
     <PlayerRow
@@ -43,102 +49,105 @@ function OnlineRow({ player, onKicked }: { player: Player; onKicked: (name: stri
       badges={<StatusBadges status={status} />}
       actions={
         <>
-          {status.whitelisted ? (
-            <RowAction
-              icon={faUserMinus}
-              label={tExt(bedrock ? 'actions.allowlistRemove' : 'actions.whitelistRemove', {})}
-              access={listAccess}
-              onClick={() =>
-                confirm({
-                  title: tExt('confirm.removeTitle', { name }),
-                  content: tExt(bedrock ? 'confirm.allowlistRemove' : 'confirm.whitelistRemove', { name }),
-                  confirm: tExt('actions.remove', {}),
-                  run: () => removeFromWhitelist(serverUuid, name),
-                  success: tExt(bedrock ? 'toast.allowlistRemoved' : 'toast.whitelistRemoved', { name }),
-                })
-              }
-            />
-          ) : (
-            <RowAction
-              icon={faListCheck}
-              label={tExt(bedrock ? 'actions.allowlistAdd' : 'actions.whitelistAdd', {})}
-              access={listAccess}
-              onClick={() =>
-                run(
-                  () => addToWhitelist(serverUuid, { name, id }),
-                  tExt(bedrock ? 'toast.allowlistAdded' : 'toast.whitelistAdded', { name }),
-                )
-              }
-            />
-          )}
+          {whitelist &&
+            (listed ? (
+              <RowAction
+                icon={faUserMinus}
+                label={text('lists.whitelist.remove', {})}
+                access={editAccess}
+                onClick={() =>
+                  confirm({
+                    title: text('lists.removeTitle', { name }),
+                    content: text('lists.whitelist.removeContent', { name }),
+                    confirm: text('lists.whitelist.removeConfirm', {}),
+                    run: () => removeFromList(serverUuid, 'whitelist', removeBody(whitelist, listed)),
+                    success: text('lists.whitelist.removed', { name }),
+                  })
+                }
+              />
+            ) : (
+              <RowAction
+                icon={faListCheck}
+                label={text('lists.whitelist.addOnline', {})}
+                access={editAccess}
+                onClick={() =>
+                  run(
+                    () => addToList(serverUuid, 'whitelist', addBody(whitelist, { name, id })),
+                    text('lists.whitelist.added', { name }),
+                  )
+                }
+              />
+            ))}
 
-          {opped ? (
-            <RowAction
-              icon={faUserSlash}
-              label={tExt('actions.deop', {})}
-              access={listAccess}
-              onClick={() =>
-                confirm({
-                  title: tExt('confirm.removeTitle', { name }),
-                  content: tExt('confirm.operatorRemove', { name }),
-                  confirm: tExt('actions.remove', {}),
-                  run: () => removeOperator(serverUuid, { name, id }),
-                  success: tExt('toast.deopped', { name }),
-                })
-              }
-            />
-          ) : (
-            <RowAction
-              icon={faUserShield}
-              label={tExt('actions.op', {})}
-              access={listAccess}
-              disabledReason={bedrock && !id ? tExt('blockers.noXuid', {}) : null}
-              onClick={() =>
-                run(
-                  () => addOperator(serverUuid, bedrock ? { name, id, level: 'operator' } : { name, id }),
-                  tExt('toast.opped', { name }),
-                )
-              }
-            />
-          )}
+          {operators &&
+            (opped ? (
+              <RowAction
+                icon={faUserSlash}
+                label={text('lists.operators.remove', {})}
+                access={editAccess}
+                onClick={() =>
+                  confirm({
+                    title: text('lists.removeTitle', { name }),
+                    content: text('lists.operators.removeContent', { name }),
+                    confirm: text('lists.operators.removeConfirm', {}),
+                    run: () => removeFromList(serverUuid, 'operators', removeBody(operators, operator)),
+                    success: text('lists.operators.removed', { name }),
+                  })
+                }
+              />
+            ) : (
+              <RowAction
+                icon={faUserShield}
+                label={text('lists.operators.addOnline', {})}
+                access={editAccess}
+                onClick={() =>
+                  run(
+                    () => addToList(serverUuid, 'operators', addBody(operators, { name, id })),
+                    text('lists.operators.added', { name }),
+                  )
+                }
+              />
+            ))}
 
-          {!bedrock && !status.banned && (
+          {bans && !banned && (
             <RowAction
               icon={faBan}
-              label={tExt('actions.ban', {})}
-              access={listAccess}
+              label={text('lists.bans.addOnline', {})}
+              access={editAccess}
               danger
               onClick={() =>
                 confirm({
-                  title: tExt('confirm.banTitle', { name }),
-                  content: tExt('confirm.banContent', { name }),
-                  confirm: tExt('actions.ban', {}),
-                  withReason: true,
-                  run: (reason) => addBan(serverUuid, { name, id, reason: reason || undefined }),
-                  success: tExt('toast.banned', { name }),
+                  title: text('online.banTitle', { name }),
+                  content: text('online.banContent', { name }),
+                  confirm: text('lists.bans.addOnline', {}),
+                  withReason: bans.reason,
+                  run: (reason) => addToList(serverUuid, 'bans', addBody(bans, { name, id, reason })),
+                  success: text('lists.bans.added', { name }),
                   onSuccess: () => onKicked(name),
                 })
               }
             />
           )}
 
-          <RowAction
-            icon={faDoorOpen}
-            label={tExt('actions.kick', {})}
-            access={kickAccess}
-            danger
-            onClick={() =>
-              confirm({
-                title: tExt('confirm.kickTitle', { name }),
-                content: tExt('confirm.kickContent', { name }),
-                confirm: tExt('actions.kick', {}),
-                withReason: true,
-                run: (reason) => kickPlayer(serverUuid, { name, reason: reason || undefined }),
-                success: tExt('toast.kicked', { name }),
-                onSuccess: () => onKicked(name),
-              })
-            }
-          />
+          {kick && (
+            <RowAction
+              icon={faDoorOpen}
+              label={text('online.kick', {})}
+              access={kickAccess}
+              danger
+              onClick={() =>
+                confirm({
+                  title: text('online.kickTitle', { name }),
+                  content: text('online.kickContent', { name }),
+                  confirm: text('online.kick', {}),
+                  withReason: kick.reason,
+                  run: (reason) => kickPlayer(serverUuid, { name, reason: reason || undefined }),
+                  success: text('online.kicked', { name }),
+                  onSuccess: () => onKicked(name),
+                })
+              }
+            />
+          )}
         </>
       }
     />
@@ -155,23 +164,16 @@ export default function OnlineTab({
   query: UseQueryResult<OnlinePlayers>;
   onKicked: (name: string) => void;
 }) {
-  const { t: tExt } = useExtTranslations();
+  const text = useText();
   const [filter, setFilter] = useState('');
 
-  if (!access.visible) {
-    return (
-      <EmptyState flush icon={faPlug} title={tExt('tabs.online', {})} description={tExt('online.noPermission', {})} />
-    );
-  }
-  if (access.blocker) {
-    return (
-      <EmptyState
-        flush
-        icon={faPlug}
-        title={tExt('tabs.online', {})}
-        description={tExt(access.blocker === 'transition' ? 'blockers.transition' : 'online.offline', {})}
-      />
-    );
+  if (!access.visible || access.blocker) {
+    const description = !access.visible
+      ? text('online.noPermission', {})
+      : access.blocker === 'notRunning'
+        ? text('online.offline', {})
+        : text(`blockers.${access.blocker ?? 'noPermission'}`, {});
+    return <EmptyState flush icon={faPlug} title={text('online.tab', {})} description={description} />;
   }
 
   const refresh = (
@@ -184,7 +186,7 @@ export default function OnlineTab({
         query.refetch();
       }}
     >
-      {tExt('common.refresh', {})}
+      {text('common.refresh', {})}
     </Button>
   );
 
@@ -210,15 +212,15 @@ export default function OnlineTab({
         filter={filter}
         onFilterChange={setFilter}
         total={online.players.length}
-        emptyText={tExt('online.empty', {})}
+        emptyText={text('online.empty', {})}
         info={
           <span className='flex flex-wrap items-center gap-x-3 gap-y-1'>
             <span className='font-medium text-(--mantine-color-text)'>
-              {tExt('online.count', { count: online.count, max: online.max })}
+              {text('online.count', { count: online.count, max: online.max })}
             </span>
             <span className='inline-flex items-center gap-1'>
               <FontAwesomeIcon icon={faCircleInfo} />
-              {tExt('online.hint', {})}
+              {text('online.hint', {})}
             </span>
           </span>
         }
