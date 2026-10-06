@@ -62,6 +62,16 @@ pub fn ip(ip: &str) -> Result<IpAddr, ApiResponse> {
         .map_err(|_| ApiResponse::error("invalid IP address"))
 }
 
+/// A command for the server: not empty, no control characters (a newline would inject a
+/// further command).
+pub fn command(command: &str) -> Result<(), ApiResponse> {
+    if command.is_empty() || command.chars().any(char::is_control) {
+        Err(ApiResponse::error("invalid command"))
+    } else {
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

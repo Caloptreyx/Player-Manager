@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import type { OnlinePlayers } from '../frontend/src/lib/model.ts';
 import {
   knownId,
   matchesFilter,
+  ONLINE_REFRESH_MS,
+  onlineRefreshInterval,
   playerStatus,
   refetchDelay,
   sortBy,
@@ -93,15 +96,45 @@ describe('matchesFilter', () => {
   });
 });
 
+const onlineList = (fields: Partial<OnlinePlayers>): OnlinePlayers => ({
+  count: 0,
+  max: 20,
+  players: [],
+  source: 'query',
+  complete: true,
+  ...fields,
+});
+
 describe('withoutPlayer', () => {
   test('removes the kicked player and lowers the count', () => {
-    const online = { count: 2, max: 20, players: [{ name: 'Notch', id: null }, { name: 'jeb_', id: null }] };
-    assert.deepEqual(withoutPlayer(online, 'notch'), { count: 1, max: 20, players: [{ name: 'jeb_', id: null }] });
+    const online = onlineList({
+      count: 2,
+      players: [
+        { name: 'Notch', id: null },
+        { name: 'jeb_', id: null },
+      ],
+    });
+    assert.deepEqual(withoutPlayer(online, 'notch'), { ...online, count: 1, players: [{ name: 'jeb_', id: null }] });
   });
 
   test('an unknown name leaves the list unchanged', () => {
-    const online = { count: 1, max: 20, players: [{ name: 'Notch', id: null }] };
+    const online = onlineList({ count: 1, players: [{ name: 'Notch', id: null }] });
     assert.deepEqual(withoutPlayer(online, 'Herobrine'), online);
+  });
+});
+
+describe('onlineRefreshInterval', () => {
+  test('answers that did not touch the console refresh by themselves', () => {
+    for (const source of ['query', 'rcon', 'ping'] as const) {
+      assert.equal(onlineRefreshInterval(onlineList({ source }), false), ONLINE_REFRESH_MS);
+    }
+    assert.equal(onlineRefreshInterval(onlineList({ source: 'ping', complete: false }), false), ONLINE_REFRESH_MS);
+  });
+
+  test('console answers, failed fetches and missing answers do not', () => {
+    assert.equal(onlineRefreshInterval(onlineList({ source: 'console' }), false), false);
+    assert.equal(onlineRefreshInterval(onlineList({ source: 'query' }), true), false);
+    assert.equal(onlineRefreshInterval(undefined, false), false);
   });
 });
 

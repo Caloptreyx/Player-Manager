@@ -9,6 +9,7 @@ import { useText } from './playerManager.ts';
 export default function ListPanel({
   filter,
   onFilterChange,
+  searchPlaceholder,
   info,
   actions,
   total,
@@ -18,6 +19,8 @@ export default function ListPanel({
 }: {
   filter: string;
   onFilterChange: (filter: string) => void;
+  /** Defaults to the search text of the lists (name, id or ip). */
+  searchPlaceholder?: string;
   info?: ReactNode;
   actions?: ReactNode;
   /** Number of entries before filtering. */
@@ -29,6 +32,7 @@ export default function ListPanel({
   children: ReactNode;
 }) {
   const text = useText();
+  const search = searchPlaceholder ?? text('lists.search', {});
 
   return (
     <div className='flex flex-col gap-3'>
@@ -38,8 +42,8 @@ export default function ListPanel({
             <TextInput
               // without info the search shares its row with the add button, even on small screens
               className={info ? 'w-full sm:w-72' : 'min-w-40 flex-1 sm:w-72 sm:flex-none'}
-              placeholder={text('lists.search', {})}
-              aria-label={text('lists.search', {})}
+              placeholder={search}
+              aria-label={search}
               leftSection={<FontAwesomeIcon icon={faMagnifyingGlass} size='sm' />}
               value={filter}
               onChange={(e) => onFilterChange(e.currentTarget.value)}

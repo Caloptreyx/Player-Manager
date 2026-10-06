@@ -2,7 +2,7 @@
 //! running server is told to reread them. BDS has no ban list.
 use super::{
     BEDROCK_NAME, FAMILY, FILES, PROPERTIES, SCORE_BEDROCK_BINARY, SCORE_BEDROCK_HINTS, XUID,
-    console, lookup, properties,
+    console, live, lookup, properties,
 };
 use crate::{
     context::{Actor, Context, list_not_supported, player_not_found, unprocessable},
@@ -104,6 +104,7 @@ pub(crate) fn descriptor(state: ServerState) -> Descriptor {
         }),
         online: Some(super::online_capability(state)),
         kick: Some(super::kick_capability(state)),
+        profiles: None,
     }
 }
 
@@ -208,6 +209,7 @@ fn done() -> Result<MutationResult, ApiResponse> {
     Ok(MutationResult {
         method: Method::File,
         restart_required: false,
+        message: None,
     })
 }
 
@@ -293,14 +295,16 @@ impl Game for MinecraftBedrock {
     }
 
     async fn online(&self, ctx: &Context<'_>, actor: &Actor<'_>) -> Result<Online, ApiResponse> {
-        let mut online = super::online(ctx, actor, &["list"]).await?;
-        let known = known_players(ctx, actor.permissions).await?;
-        for player in online
-            .players
-            .iter_mut()
-            .filter(|player| player.id.is_none())
-        {
-            player.id = known_xuid(&known, &player.name);
+        let mut online = live::bedrock(ctx, actor).await?;
+        if online.players.iter().any(|player| player.id.is_none()) {
+            let known = known_players(ctx, actor.permissions).await?;
+            for player in online
+                .players
+                .iter_mut()
+                .filter(|player| player.id.is_none())
+            {
+                player.id = known_xuid(&known, &player.name);
+            }
         }
         Ok(online)
     }
@@ -445,6 +449,7 @@ impl Game for MinecraftBedrock {
         Ok(MutationResult {
             method: Method::File,
             restart_required: ctx.state == ServerState::Running,
+            message: None,
         })
     }
 

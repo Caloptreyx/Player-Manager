@@ -57,18 +57,29 @@ export function GatedButton({
   icon,
   label,
   access,
+  variant = 'filled',
+  loading = false,
   onClick,
 }: {
   icon: IconDefinition;
   label: string;
   access: Access;
+  /** `default`: a secondary action next to a primary one. */
+  variant?: 'filled' | 'default';
+  loading?: boolean;
   onClick: () => void;
 }) {
   const { hidden, reason } = useGate(access);
   if (hidden) return null;
 
   const button = (
-    <Button leftSection={<FontAwesomeIcon icon={icon} />} disabled={reason !== null} onClick={onClick}>
+    <Button
+      variant={variant}
+      leftSection={<FontAwesomeIcon icon={icon} />}
+      disabled={reason !== null}
+      loading={loading}
+      onClick={onClick}
+    >
       {label}
     </Button>
   );

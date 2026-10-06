@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { validateId, validateIp, validateName, validateReason } from '../frontend/src/lib/validation.ts';
+import {
+  normalizeItemId,
+  validateId,
+  validateIp,
+  validateItemId,
+  validateName,
+  validateReason,
+} from '../frontend/src/lib/validation.ts';
 import { bedrockGame, javaGame } from './fixtures.ts';
 
 const java = javaGame('offline');
@@ -80,5 +87,23 @@ describe('validateIp', () => {
 
   test('empty is required', () => {
     assert.equal(validateIp(''), 'required');
+  });
+});
+
+describe('item ids', () => {
+  test('the namespace defaults to minecraft; surrounding spaces go', () => {
+    assert.equal(normalizeItemId(' diamond '), 'minecraft:diamond');
+    assert.equal(normalizeItemId('minecraft:oak_log'), 'minecraft:oak_log');
+    assert.equal(normalizeItemId('create:brass_ingot'), 'create:brass_ingot');
+    assert.equal(normalizeItemId('mod.name:tools/big-hammer'), 'mod.name:tools/big-hammer');
+  });
+
+  test('ids the give command would reject are invalid', () => {
+    for (const id of ['Diamond', 'minecraft:diamond sword', 'a:b:c', 'minecraft:', ':stone', 'stone{nbt:1}']) {
+      assert.equal(normalizeItemId(id), null, id);
+      assert.equal(validateItemId(id), 'itemId', id);
+    }
+    assert.equal(validateItemId('  '), 'required');
+    assert.equal(validateItemId('stone'), null);
   });
 });

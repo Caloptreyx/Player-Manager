@@ -1,10 +1,10 @@
 import type { Entry, Game, ListSpec } from '../frontend/src/lib/model.ts';
 
-// game descriptors as the backend sends them for Minecraft (contract v2)
+// game descriptors as the backend sends them for Minecraft (contract v3)
 
 const CONSOLE = 'control.console';
-const READ_CONSOLE = 'control.read-console';
 const FILES = 'files.create';
+const READ_FILES = 'files.read-content';
 
 export const entry = (fields: Partial<Entry>): Entry => ({
   name: null,
@@ -56,12 +56,22 @@ export const javaGame = (state: 'running' | 'offline' | 'starting'): Game => {
     lists: javaLists(!running),
     edit,
     whitelist_toggle: edit,
+    // the online sources skip what the user may not use; the page permission is all it needs
     online: {
-      requires: [CONSOLE, READ_CONSOLE],
-      visible_with: [CONSOLE, READ_CONSOLE],
+      requires: [],
+      visible_with: [],
       blocked: running ? null : state === 'starting' ? 'transition' : 'not_running',
     },
     kick: { requires: [CONSOLE], visible_with: [CONSOLE], blocked: running ? null : 'not_running', reason: true },
+    profiles: {
+      view: { requires: [READ_FILES], visible_with: [READ_FILES], blocked: null },
+      edit_offline: { requires: [FILES], visible_with: [FILES], blocked: state === 'starting' ? 'transition' : null },
+      edit_live: {
+        requires: [CONSOLE],
+        visible_with: [CONSOLE],
+        blocked: running ? null : state === 'starting' ? 'transition' : 'not_running',
+      },
+    },
   };
 };
 
@@ -90,12 +100,9 @@ export const bedrockGame = (state: 'running' | 'offline'): Game => {
       method: 'file',
     },
     whitelist_toggle: { requires: [FILES], visible_with: [FILES], blocked: null, method: 'file' },
-    online: {
-      requires: [CONSOLE, READ_CONSOLE],
-      visible_with: [CONSOLE, READ_CONSOLE],
-      blocked: running ? null : 'not_running',
-    },
+    online: { requires: [], visible_with: [], blocked: running ? null : 'not_running' },
     kick: { requires: [CONSOLE], visible_with: [CONSOLE], blocked: running ? null : 'not_running', reason: true },
+    profiles: null,
   };
 };
 

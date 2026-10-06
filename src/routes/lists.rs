@@ -56,7 +56,12 @@ fn name(descriptor: &Descriptor, name: String) -> Result<String, ApiResponse> {
     Ok(name)
 }
 
-fn id(game: &dyn Game, descriptor: &Descriptor, id: &str) -> Result<String, ApiResponse> {
+/// A player id matching the game's id pattern, normalized (400 otherwise).
+pub(super) fn id(
+    game: &dyn Game,
+    descriptor: &Descriptor,
+    id: &str,
+) -> Result<String, ApiResponse> {
     validate::player_id(descriptor.player_id.pattern, id)?;
     Ok(game.normalize_id(id))
 }

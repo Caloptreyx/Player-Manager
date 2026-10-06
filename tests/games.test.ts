@@ -77,3 +77,76 @@ describe('levels and notes', () => {
     assert.equal(addFormNote(t, spec(javaGame('running'), 'bans')), null);
   });
 });
+
+describe('minecraft java profiles', () => {
+  const { profile } = gameUi('minecraft_java');
+
+  test('vanilla item icons come from the icon CDN by id; modded ids get none', () => {
+    assert.equal(
+      profile.itemIcon('minecraft:diamond_sword'),
+      'https://mc.nerothe.com/img/1.26.2/minecraft_diamond_sword.png',
+    );
+    assert.equal(profile.itemIcon('oak_log'), 'https://mc.nerothe.com/img/1.26.2/minecraft_oak_log.png');
+    assert.equal(profile.itemIcon('create:brass_ingot'), null);
+    assert.equal(profile.itemIcon('minecraft:../secret'), null);
+  });
+
+  test('mobs show their spawn egg, general stats no icon', () => {
+    assert.equal(profile.statIcon('minecraft:mined', 'minecraft:stone'), profile.itemIcon('minecraft:stone'));
+    assert.equal(
+      profile.statIcon('minecraft:killed', 'minecraft:zombie'),
+      profile.itemIcon('minecraft:zombie_spawn_egg'),
+    );
+    assert.equal(
+      profile.statIcon('minecraft:killed_by', 'minecraft:creeper'),
+      profile.itemIcon('minecraft:creeper_spawn_egg'),
+    );
+    assert.equal(profile.statIcon('minecraft:custom', 'minecraft:jump'), null);
+  });
+
+  test('general stats are counted in ticks, centimeters and tenths of health; the rest are counts', () => {
+    assert.equal(profile.statFormat('minecraft:custom', 'minecraft:play_time'), 'ticks');
+    assert.equal(profile.statFormat('minecraft:custom', 'minecraft:time_since_death'), 'ticks');
+    assert.equal(profile.statFormat('minecraft:custom', 'minecraft:walk_one_cm'), 'centimeters');
+    assert.equal(profile.statFormat('minecraft:custom', 'minecraft:damage_dealt'), 'tenthHealth');
+    assert.equal(profile.statFormat('minecraft:custom', 'minecraft:jump'), 'count');
+    assert.equal(profile.statFormat('minecraft:mined', 'minecraft:walk_one_cm'), 'count');
+    assert.equal(profile.statLabel('minecraft:walk_one_cm'), 'Walk');
+    assert.equal(profile.statLabel('minecraft:play_one_minute'), 'Play Time');
+  });
+
+  test('highlights read play time from either key and add up flying', () => {
+    const value = (stats: Record<string, Record<string, number>>, key: string) =>
+      profile.statHighlights(t, stats).find((highlight) => highlight.key === key)?.value;
+    assert.equal(value({ 'minecraft:custom': { 'minecraft:play_time': 72_000 } }, 'playTime'), 72_000);
+    assert.equal(value({ 'minecraft:custom': { 'minecraft:play_one_minute': 1200 } }, 'playTime'), 1200);
+    const custom = { 'minecraft:fly_one_cm': 500, 'minecraft:aviate_one_cm': 250, 'minecraft:deaths': 3 };
+    assert.equal(value({ 'minecraft:custom': custom }, 'flown'), 750);
+    assert.equal(value({ 'minecraft:custom': custom }, 'deaths'), 3);
+    assert.equal(value({}, 'mobKills'), 0);
+    assert.equal(profile.statHighlights(t, {})[0].label, 'games.minecraftJava.stats.playTime');
+  });
+
+  test('categories follow the statistics screen; unknown ones are appended by id', () => {
+    const present = ['minecraft:custom', 'mymod:crafted_magic', 'minecraft:killed', 'minecraft:mined'];
+    assert.deepEqual(profile.statCategories(t, present), [
+      { id: 'minecraft:mined', label: 'games.minecraftJava.statCategories.mined' },
+      { id: 'minecraft:killed', label: 'games.minecraftJava.statCategories.killed' },
+      { id: 'minecraft:custom', label: 'games.minecraftJava.statCategories.custom' },
+      { id: 'mymod:crafted_magic', label: 'Crafted Magic' },
+    ]);
+  });
+
+  test('vanilla dimensions are named, custom worlds prettified', () => {
+    assert.equal(profile.dimensionLabel(t, 'minecraft:the_nether'), 'games.minecraftJava.dimensions.the_nether');
+    assert.equal(profile.dimensionLabel(t, 'mymod:sky_islands'), 'Sky Islands');
+  });
+
+  test('the body render prefers the undashed uuid', () => {
+    assert.equal(
+      profile.bodyUrl({ name: 'Notch', id: NOTCH }, 320),
+      `https://mc-heads.net/body/${NOTCH.replaceAll('-', '')}/320/right`,
+    );
+    assert.equal(gameUi('minecraft_bedrock').profile.bodyUrl({ name: 'Gamer', id: '1' }, 320), null);
+  });
+});

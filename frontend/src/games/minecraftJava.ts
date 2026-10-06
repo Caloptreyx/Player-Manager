@@ -1,4 +1,5 @@
 import type { GameModule } from './index.ts';
+import minecraftJavaProfile from './minecraftJavaProfile.ts';
 
 const LEVELS = ['1', '2', '3', '4'] as const;
 const isLevel = (level: string): level is (typeof LEVELS)[number] => (LEVELS as readonly string[]).includes(level);
@@ -6,6 +7,7 @@ const isLevel = (level: string): level is (typeof LEVELS)[number] => (LEVELS as 
 const minecraftJava: GameModule = {
   name: 'Minecraft Java',
   color: 'orange',
+  profile: minecraftJavaProfile,
   // mc-heads renders the skin of a uuid (preferred, undashed) or a name
   avatarUrl: (player, size = 32) => {
     const key = player.id ? player.id.replaceAll('-', '').toLowerCase() : player.name;

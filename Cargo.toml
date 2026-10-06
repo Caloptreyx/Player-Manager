@@ -1,6 +1,6 @@
 [package]
 name = "dev_caloptreyx_playermanager"
-description = "Manage the players of Minecraft Java and Bedrock servers: online players, whitelist, operators and bans."
+description = "Manage the players of Minecraft Java and Bedrock servers: online players, whitelist, operators, bans and Java player profiles."
 authors = ["Caloptreyx"]
 version = "0.1.0"
 edition = { workspace = true }
@@ -22,3 +22,4 @@ chrono = { workspace = true }
 tokio = { workspace = true }
 regex = { workspace = true }
 md5 = "0.8"
+flate2 = "1.1"

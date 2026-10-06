@@ -38,7 +38,7 @@ export const BLOCKED = ['transition', 'not_running'] as const;
 export interface Capability {
   /** All of these are needed right now. */
   requires: string[];
-  /** The control is hidden when the user holds none of these: no server state would allow it. */
+  /** The control is hidden when the user holds none of these (no server state would allow it); empty: never hidden. */
   visible_with: string[];
   /** Why the current server state forbids the action. */
   blocked: (typeof BLOCKED)[number] | null;
@@ -66,6 +66,15 @@ export interface ListSpec {
   bypasses_player_limit: boolean;
 }
 
+/** Player profiles (saved player data); null for games without them. */
+export interface ProfilesSpec {
+  view: Capability;
+  /** Edits of the saved data files while the player is offline. */
+  edit_offline: Capability | null;
+  /** Console commands while the player is online. */
+  edit_live: Capability | null;
+}
+
 export interface Game {
   id: string;
   family: string;
@@ -79,6 +88,7 @@ export interface Game {
   whitelist_toggle: MethodCapability | null;
   online: Capability | null;
   kick: KickCapability | null;
+  profiles: ProfilesSpec | null;
 }
 
 export interface FileError {
@@ -97,13 +107,90 @@ export interface Overview {
   errors: FileError[];
 }
 
+/** Where the online list came from: the query protocol, RCON, the server list ping or a console `list`. */
+export const ONLINE_SOURCES = ['query', 'rcon', 'ping', 'console'] as const;
+export type OnlineSource = (typeof ONLINE_SOURCES)[number];
+
 export interface OnlinePlayers {
   count: number;
   max: number;
   players: Player[];
+  source: OnlineSource;
+  /** False: `count` is right but the server hid some of the names. */
+  complete: boolean;
 }
 
 export interface MutationResult {
   method: Method;
   restart_required: boolean;
+  /** The server's reply to a command sent over RCON; null otherwise. */
+  message: string | null;
 }
+
+export interface ProfileSummary {
+  id: string;
+  name: string | null;
+  /** RFC 3339, when the server last wrote the player data. */
+  last_saved: string;
+}
+
+export const GAMEMODES = ['survival', 'creative', 'adventure', 'spectator'] as const;
+export type Gamemode = (typeof GAMEMODES)[number];
+
+export interface Position {
+  x: number;
+  y: number;
+  z: number;
+  dimension: string;
+}
+
+export interface Item {
+  /** Command slot name, e.g. `hotbar.0`, `armor.head`, `enderchest.3`. */
+  slot: string;
+  id: string;
+  count: number;
+  /** Custom name as plain text. */
+  name: string | null;
+  enchantments: { id: string; level: number }[];
+  damage: number | null;
+  /** The item as SNBT. */
+  snbt: string;
+}
+
+export interface Effect {
+  id: string;
+  amplifier: number;
+  /** In ticks, -1 infinite. */
+  duration: number;
+}
+
+export interface Profile {
+  id: string;
+  name: string | null;
+  last_saved: string;
+  data_version: number | null;
+  gamemode: Gamemode | null;
+  health: number | null;
+  max_health: number | null;
+  food: number | null;
+  saturation: number | null;
+  xp_level: number | null;
+  xp_progress: number | null;
+  xp_total: number | null;
+  position: Position | null;
+  spawn: Position | null;
+  effects: Effect[];
+  inventory: Item[];
+  ender_chest: Item[];
+  /** Category → stat → value; null without a stats file. */
+  stats: Record<string, Record<string, number>> | null;
+  /** Done advancements without recipes, newest first; null without an advancements file. */
+  advancements: { done: number; items: { id: string; done_at: string | null }[] } | null;
+}
+
+export type ProfileAction =
+  | { action: 'clear_slot'; slot: string }
+  | { action: 'clear_container'; container: 'inventory' | 'ender_chest' }
+  | { action: 'set_gamemode'; gamemode: Gamemode }
+  | { action: 'set_xp_level'; level: number }
+  | { action: 'give'; item: string; count: number };

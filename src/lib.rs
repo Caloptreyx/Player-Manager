@@ -10,6 +10,7 @@ mod games;
 mod lists;
 mod model;
 mod routes;
+mod tunnel;
 mod validate;
 
 #[derive(Default)]

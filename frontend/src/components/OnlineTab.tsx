@@ -1,10 +1,12 @@
 import {
   faArrowRotateRight,
-  faCircleInfo,
+  faEyeSlash,
   faPlug,
   faPowerOff,
+  faTerminal,
   faTriangleExclamation,
   faUserClock,
+  faWifi,
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Skeleton } from '@mantine/core';
@@ -12,6 +14,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import { useState } from 'react';
 import { getHttpStatus, httpErrorToHuman } from '@/api/axios.ts';
 import Button from '@/elements/buttons/Button.tsx';
+import Badge from '@/elements/data-display/Badge.tsx';
 import Alert from '@/elements/feedback/Alert.tsx';
 import EmptyState from '@/elements/feedback/EmptyState.tsx';
 import Tooltip from '@/elements/overlays/Tooltip.tsx';
@@ -66,7 +69,28 @@ function OnlineSkeleton({ count = 3 }: { count?: number }) {
   );
 }
 
-// the online list is fetched on demand only: every fetch runs `list` in the server console
+/** Where the list came from; only a console answer cost a `list` command, the others refresh by themselves. */
+function SourceChip({ source }: { source: OnlinePlayers['source'] }) {
+  const text = useText();
+  const viaConsole = source === 'console';
+
+  return (
+    <Tooltip label={text(viaConsole ? 'online.hint' : 'online.autoRefresh', {})} multiline maw={260}>
+      <Badge
+        size='sm'
+        variant='default'
+        color='gray'
+        className='cursor-help font-normal normal-case'
+        leftSection={<FontAwesomeIcon icon={viaConsole ? faTerminal : faWifi} />}
+      >
+        {text(`online.source.${source}`, {})}
+      </Badge>
+    </Tooltip>
+  );
+}
+
+// the online list is fetched when the tab opens and on refresh; answers that did not need the console refresh
+// themselves in the background (see `useOnlinePlayers`) without the loading skeleton
 export default function OnlineTab({
   access,
   query,
@@ -78,6 +102,7 @@ export default function OnlineTab({
 }) {
   const text = useText();
   const [filter, setFilter] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
 
   if (!access.visible || access.blocker) {
     const offline = access.visible && access.blocker === 'notRunning';
@@ -98,10 +123,11 @@ export default function OnlineTab({
   }
 
   const refetch = () => {
-    query.refetch();
+    setRefreshing(true);
+    query.refetch().finally(() => setRefreshing(false));
   };
 
-  // 504: the server did not answer the `list` command in time, which is worth a retry rather than alarming
+  // 504: no source answered in time, which is worth a retry rather than alarming
   const error = query.isError && !query.isFetching && (
     <Alert
       color={getHttpStatus(query.error) === 504 ? 'yellow' : 'red'}
@@ -120,11 +146,15 @@ export default function OnlineTab({
   if (!query.data && !query.isFetching) return error || <OnlineSkeleton />;
 
   const online = query.data;
+  // the skeleton stands in for the first answer and explicit refreshes, not for the silent background ones
+  const loading = !online || refreshing;
   const players = online
     ? sortBy(online.players, (player) => player.name).filter((player) =>
         matchesFilter([player.name, player.id], filter),
       )
     : [];
+  const hidden = online && !online.complete ? Math.max(0, online.count - online.players.length) : 0;
+  const hiddenNote = hidden === 1 ? text('online.hiddenOne', {}) : text('online.hidden', { count: hidden });
   const checked = new Date(query.dataUpdatedAt).toLocaleTimeString(undefined, {
     hour: '2-digit',
     minute: '2-digit',
@@ -138,10 +168,11 @@ export default function OnlineTab({
       <ListPanel
         filter={filter}
         onFilterChange={setFilter}
+        searchPlaceholder={text('players.search', {})}
         total={online?.players.length ?? 0}
         shown={players.length}
         info={
-          <span className='inline-flex flex-wrap items-center gap-x-1.5'>
+          <span className='inline-flex flex-wrap items-center gap-x-1.5 gap-y-1'>
             {online ? (
               <>
                 <span className='font-medium text-(--mantine-color-text)'>
@@ -149,39 +180,39 @@ export default function OnlineTab({
                 </span>
                 <span>·</span>
                 <span>{text('online.checked', { time: checked })}</span>
+                <span className='ml-1'>
+                  <SourceChip source={online.source} />
+                </span>
               </>
             ) : (
               <Skeleton height={12} width={180} />
             )}
-            <Tooltip label={text('online.hint', {})} multiline maw={260}>
-              <FontAwesomeIcon icon={faCircleInfo} className='ml-1 cursor-help' />
-            </Tooltip>
           </span>
         }
         actions={
           <Button
             variant='default'
             leftSection={<FontAwesomeIcon icon={faArrowRotateRight} />}
-            loading={query.isFetching}
+            loading={loading && query.isFetching}
             onClick={refetch}
           >
             {text('common.refresh', {})}
           </Button>
         }
         empty={
-          query.isFetching ? (
+          loading ? (
             <OnlineSkeleton />
           ) : (
             <EmptyState
               flush
-              icon={faUserClock}
-              title={text('online.emptyTitle', {})}
-              description={text('online.empty', {})}
+              icon={hidden > 0 ? faEyeSlash : faUserClock}
+              title={hidden > 0 ? hiddenNote : text('online.emptyTitle', {})}
+              description={hidden > 0 ? '' : text('online.empty', {})}
             />
           )
         }
       >
-        {query.isFetching ? (
+        {loading ? (
           <OnlineSkeleton count={Math.min(Math.max(players.length, 1), 6)} />
         ) : (
           <div className={GRID}>
@@ -191,6 +222,12 @@ export default function OnlineTab({
           </div>
         )}
       </ListPanel>
+      {hidden > 0 && !loading && (online?.players.length ?? 0) > 0 && (
+        <p className='flex items-center gap-2 text-sm text-(--mantine-color-dimmed)'>
+          <FontAwesomeIcon icon={faEyeSlash} />
+          {hiddenNote}
+        </p>
+      )}
     </div>
   );
 }

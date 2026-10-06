@@ -1,7 +1,14 @@
 import type { Capability, Game, MethodCapability } from './model.ts';
 
 /** Why a control is disabled; permission blockers name the missing panel permission. */
-export type Blocker = 'transition' | 'notRunning' | 'noConsole' | 'noReadConsole' | 'noFiles' | 'noPermission';
+export type Blocker =
+  | 'transition'
+  | 'notRunning'
+  | 'playerOffline'
+  | 'noConsole'
+  | 'noReadConsole'
+  | 'noFiles'
+  | 'noPermission';
 
 export interface Access {
   /** False when the user could not do this in any server state; the control is hidden. */
@@ -21,13 +28,14 @@ const PERMISSION_BLOCKERS: Record<string, Blocker> = {
 };
 
 /**
- * Hidden when the user holds none of `visible_with`; otherwise blocked by the server state first, then by the
- * first permission of `requires` the user lacks.
+ * Hidden when the user holds none of `visible_with` (an empty list needs nothing beyond the page permission);
+ * otherwise blocked by the server state first, then by the first permission of `requires` the user lacks.
  */
 export const capabilityAccess = (capability: Capability | null, granted: ReadonlySet<string>): Access => {
   if (!capability) return NO_ACCESS;
 
-  const visible = capability.visible_with.some((permission) => granted.has(permission));
+  const { visible_with: visibleWith } = capability;
+  const visible = visibleWith.length === 0 || visibleWith.some((permission) => granted.has(permission));
   if (capability.blocked)
     return { visible, blocker: capability.blocked === 'transition' ? 'transition' : 'notRunning' };
 
@@ -40,7 +48,17 @@ export const gamePermissions = (game: Game | null): string[] => {
   if (!game) return [];
 
   const permissions = new Set<string>();
-  for (const capability of [game.edit, game.whitelist_toggle, game.online, game.kick]) {
+  const { profiles } = game;
+  const capabilities = [
+    game.edit,
+    game.whitelist_toggle,
+    game.online,
+    game.kick,
+    profiles?.view,
+    profiles?.edit_offline,
+    profiles?.edit_live,
+  ];
+  for (const capability of capabilities) {
     for (const permission of [...(capability?.requires ?? []), ...(capability?.visible_with ?? [])]) {
       permissions.add(permission);
     }

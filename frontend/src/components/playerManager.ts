@@ -1,7 +1,7 @@
 import { createContext, useContext } from 'react';
 import { type GameText, type GameUi, gameText } from '../games/index.ts';
 import type { Access } from '../lib/access.ts';
-import type { Game, MutationResult, Overview } from '../lib/model.ts';
+import type { Game, MutationResult, Overview, ProfileSummary } from '../lib/model.ts';
 import { useExtTranslations } from '../translations.ts';
 
 export interface ConfirmRequest {
@@ -23,7 +23,9 @@ export interface PlayerManager {
   /** Adding to and removing from the lists. */
   editAccess: Access;
   kickAccess: Access;
-  /** Runs a mutation, toasts the outcome and schedules the overview refetch; resolves to whether it succeeded. */
+  /** The saved player profiles; null while unknown or when the user cannot view them. */
+  profiles: ProfileSummary[] | null;
+  /** Runs a mutation, toasts the outcome and schedules the refetch of what it changed; resolves to whether it succeeded. */
   run: (action: () => Promise<MutationResult>, success: string) => Promise<boolean>;
   /** Opens the confirmation dialog of a destructive action. */
   confirm: (request: ConfirmRequest) => void;

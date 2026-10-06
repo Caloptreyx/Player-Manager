@@ -2,9 +2,27 @@ import type { Game } from './model.ts';
 
 // client-side mirror of the backend validation, for form feedback only; the backend stays authoritative and
 // checks names and ids against the same patterns the game descriptor carries
-export type FieldError = 'required' | 'name' | 'id' | 'reasonLength' | 'reasonControl' | 'ip' | 'duplicate';
+export type FieldError = 'required' | 'name' | 'id' | 'reasonLength' | 'reasonControl' | 'ip' | 'duplicate' | 'itemId';
 
 export const REASON_MAX_LENGTH = 256;
+
+/** Bounds of the profile actions, as the backend checks them. */
+export const XP_LEVEL_MAX = 21863;
+export const GIVE_COUNT_MAX = 6400;
+
+const ITEM_ID = /^[a-z0-9_.-]+:[a-z0-9_./-]+$/;
+
+/** The item id a give sends: trimmed, `minecraft:` when the namespace is left out; null when invalid. */
+export const normalizeItemId = (input: string): string | null => {
+  const trimmed = input.trim();
+  const id = trimmed.includes(':') ? trimmed : `minecraft:${trimmed}`;
+  return ITEM_ID.test(id) ? id : null;
+};
+
+export const validateItemId = (input: string): FieldError | null => {
+  if (input.trim() === '') return 'required';
+  return normalizeItemId(input) === null ? 'itemId' : null;
+};
 
 export const validateName = (game: Pick<Game, 'player_name'>, name: string): FieldError | null => {
   if (name === '') return 'required';

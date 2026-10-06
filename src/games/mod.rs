@@ -3,8 +3,8 @@
 use crate::{
     context::{Actor, Context, unsupported},
     model::{
-        Descriptor, Entry, FileError, Info, ListKind, ListSpec, Method, MutationResult, Online,
-        Player,
+        Container, Descriptor, Entry, FileError, Gamemode, Info, ListKind, ListSpec, Method,
+        MutationResult, Online, Player, Profile, ProfileSummary, Slot,
     },
 };
 use shared::{models::user::PermissionManager, response::ApiResponse};
@@ -68,6 +68,27 @@ pub enum Selector {
     Ip(IpAddr),
 }
 
+/// A validated profile action: slots come from the closed set of slot names, the XP level is
+/// at most 21863, `item` is a namespaced id and `count` is 1 to 6400.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProfileAction {
+    ClearSlot(Slot),
+    ClearContainer(Container),
+    SetGamemode(Gamemode),
+    SetXpLevel(u32),
+    Give { item: String, count: u32 },
+}
+
+/// How a profile action reaches the player, decided by the route from the server state and
+/// the players online.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProfileMode {
+    /// The player is online: commands addressed to `name`, which matches the name pattern.
+    Live { name: String },
+    /// The player is offline: their saved data is edited.
+    File,
+}
+
 /// One server type the extension can manage.
 ///
 /// Adding a game:
@@ -76,8 +97,8 @@ pub enum Selector {
 ///    capabilities for the current server state; the routes enforce those capabilities and
 ///    validate request bodies against them before calling the game, so the other methods
 ///    only do the work. Leave optional features (online players, list edits, whitelist toggle,
-///    kick) at their default implementation and `None` in the descriptor when the game lacks
-///    them.
+///    kick, player profiles) at their default implementation and `None` in the descriptor
+///    when the game lacks them.
 /// 2. Add the struct to [`GAMES`] and pick detection scores that rank it correctly against the
 ///    other games.
 /// 3. Optionally add a frontend module in `frontend/src/games/` (display name, avatars,
@@ -115,7 +136,8 @@ pub trait Game: Send + Sync {
         permissions: &PermissionManager,
     ) -> Result<Contents, ApiResponse>;
 
-    /// The players online.
+    /// The players online. `actor` decides which sources may be asked (and is logged for the
+    /// commands sent); the route only checked the page permission.
     async fn online(&self, _ctx: &Context<'_>, _actor: &Actor<'_>) -> Result<Online, ApiResponse> {
         Err(unsupported("listing online players"))
     }
@@ -164,6 +186,30 @@ pub trait Game: Send + Sync {
         _reason: Option<&str>,
     ) -> Result<MutationResult, ApiResponse> {
         Err(unsupported("kicking players"))
+    }
+
+    /// The saved player profiles, newest first.
+    async fn profiles(&self, _ctx: &Context<'_>) -> Result<Vec<ProfileSummary>, ApiResponse> {
+        Err(unsupported("player profiles"))
+    }
+
+    /// The saved profile of player `id` (normalized with [`Game::normalize_id`]); 404 when
+    /// the game saved nothing for it.
+    async fn profile(&self, _ctx: &Context<'_>, _id: &str) -> Result<Profile, ApiResponse> {
+        Err(unsupported("player profiles"))
+    }
+
+    /// Runs an action on the saved player `id` the way `mode` says (the route checked the
+    /// capability of that mode and that `give` only runs live).
+    async fn profile_action(
+        &self,
+        _ctx: &Context<'_>,
+        _actor: &Actor<'_>,
+        _id: &str,
+        _mode: ProfileMode,
+        _action: ProfileAction,
+    ) -> Result<MutationResult, ApiResponse> {
+        Err(unsupported("editing player profiles"))
     }
 }
 

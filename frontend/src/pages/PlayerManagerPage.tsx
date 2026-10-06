@@ -1,7 +1,8 @@
-import { faCircleInfo, faCubes, faPlug } from '@fortawesome/free-solid-svg-icons';
+import { faCircleInfo, faCubes, faPlug, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { httpErrorToHuman } from '@/api/axios.ts';
 import Button from '@/elements/buttons/Button.tsx';
 import ServerContentContainer from '@/elements/containers/ServerContentContainer.tsx';
@@ -9,9 +10,6 @@ import Card from '@/elements/data-display/Card.tsx';
 import Alert from '@/elements/feedback/Alert.tsx';
 import EmptyState from '@/elements/feedback/EmptyState.tsx';
 import Tabs from '@/elements/layout/Tabs.tsx';
-import { useServerPermissions } from '@/plugins/usePermissions.ts';
-import { useServerStore } from '@/stores/server.ts';
-import { getOnlinePlayers, getOverview, playerManagerQueryKey } from '../api.ts';
 import ConfirmActionModal from '../components/ConfirmActionModal.tsx';
 import FileErrorsAlert from '../components/FileErrorsAlert.tsx';
 import ListTab from '../components/ListTab.tsx';
@@ -19,48 +17,56 @@ import { LIST_STYLES } from '../components/listStyles.ts';
 import OnlineTab from '../components/OnlineTab.tsx';
 import OverviewHeader from '../components/OverviewHeader.tsx';
 import PageSkeleton from '../components/PageSkeleton.tsx';
+import PlayersTab from '../components/PlayersTab.tsx';
 import { type ConfirmRequest, type PlayerManager, PlayerManagerContext } from '../components/playerManager.ts';
 import StatTiles from '../components/StatTiles.tsx';
 import { GAME_NAMES, gameText, gameUi } from '../games/index.ts';
-import { capabilityAccess, gamePermissions } from '../lib/access.ts';
+import { capabilityAccess } from '../lib/access.ts';
 import type { OnlinePlayers } from '../lib/model.ts';
 import { withoutPlayer } from '../lib/players.ts';
 import { useExtTranslations } from '../translations.ts';
-import useMutationRunner from './useMutationRunner.ts';
+import { onlineKey, overviewKey, useOnlinePlayers, useOverview, useProfiles } from './queries.ts';
+import useMutationRunner from './useMutationRunner.tsx';
 
 export default function PlayerManagerPage() {
   const { t: tExt } = useExtTranslations();
   const queryClient = useQueryClient();
-  const serverUuid = useServerStore((state) => state.server.uuid);
-  const liveState = useServerStore((state) => state.state);
-
-  const overviewQuery = useQuery({
-    queryKey: [...playerManagerQueryKey(serverUuid), 'overview'],
-    queryFn: () => getOverview(serverUuid),
-  });
-  const { run, syncing, restartRequired, dismissRestart } = useMutationRunner(serverUuid);
-  const [tab, setTab] = useState<string | null>(null);
+  const { serverUuid, overviewQuery, granted } = useOverview();
+  const { run, syncing, restartRequired, dismissRestart } = useMutationRunner(() =>
+    queryClient.invalidateQueries({ queryKey: overviewKey(serverUuid) }),
+  );
+  // the tab lives in the url, so coming back from a profile opens the tab it was opened from
+  const [searchParams, setSearchParams] = useSearchParams();
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmRequest | null>(null);
-
-  // the websocket knows about power changes first; the overview (and with it the capabilities) follows
-  const previousState = useRef(liveState);
-  useEffect(() => {
-    if (previousState.current === liveState) return;
-    previousState.current = liveState;
-    queryClient.invalidateQueries({ queryKey: [...playerManagerQueryKey(serverUuid), 'overview'] });
-  }, [liveState, queryClient, serverUuid]);
 
   const overview = overviewQuery.data;
   const game = overview?.game ?? null;
   const state = overview?.state ?? 'offline';
 
-  // the capabilities name the permissions they need; check them all with one hook call
-  const permissions = gamePermissions(game);
-  const held = useServerPermissions(permissions);
-  const granted = new Set(permissions.filter((_, index) => held[index]));
-
   const online = capabilityAccess(game?.online ?? null, granted);
-  const activeTab = tab ?? (state === 'running' && online.visible ? 'online' : (game?.lists[0]?.kind ?? 'online'));
+  const profilesView = capabilityAccess(game?.profiles?.view ?? null, granted);
+  const tabs = [
+    ...(game?.online ? ['online'] : []),
+    ...(profilesView.visible ? ['players'] : []),
+    ...(game?.lists.map((spec) => spec.kind) ?? []),
+  ];
+  const requested = searchParams.get('tab');
+  const activeTab =
+    requested !== null && tabs.includes(requested)
+      ? requested
+      : state === 'running' && online.visible
+        ? 'online'
+        : (game?.lists[0]?.kind ?? 'online');
+  const setTab = (value: string | null) => {
+    if (value === null) return;
+    setSearchParams(
+      (params) => {
+        params.set('tab', value);
+        return params;
+      },
+      { replace: true },
+    );
+  };
 
   // the tab row scrolls sideways on narrow screens; keep the active tab (e.g. opened from a tile) in sight
   const tabList = useRef<HTMLDivElement>(null);
@@ -74,20 +80,19 @@ export default function PlayerManagerPage() {
     }
   }, [activeTab]);
 
-  const onlineKey = [...playerManagerQueryKey(serverUuid), 'online'];
-  const onlineQuery = useQuery({
-    queryKey: onlineKey,
-    queryFn: () => getOnlinePlayers(serverUuid),
-    // every fetch runs `list` in the console: only when the tab opens or on refresh, never in the background
-    enabled: activeTab === 'online' && online.visible && online.blocker === null,
-    staleTime: 0,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
-    retry: false,
-  });
+  // fetched for the online tab and for the online badges of the players tab
+  const onlineQuery = useOnlinePlayers(
+    serverUuid,
+    (activeTab === 'online' || activeTab === 'players') && online.visible && online.blocker === null,
+  );
+  // the list of saved players also tells which rows get a "View profile" action
+  const profilesQuery = useProfiles(serverUuid, profilesView.visible && profilesView.blocker === null);
 
   const removeOnline = (name: string) =>
-    queryClient.setQueryData<OnlinePlayers>(onlineKey, (current) => current && withoutPlayer(current, name));
+    queryClient.setQueryData<OnlinePlayers>(
+      onlineKey(serverUuid),
+      (current) => current && withoutPlayer(current, name),
+    );
 
   const runConfirmed = async (request: ConfirmRequest, reason: string) => {
     const ok = await run(() => request.run(reason), request.success);
@@ -144,6 +149,7 @@ export default function PlayerManagerPage() {
     overview,
     editAccess: capabilityAccess(game.edit, granted),
     kickAccess: capabilityAccess(game.kick, granted),
+    profiles: profilesQuery.data ?? null,
     run,
     confirm: setPendingConfirm,
   };
@@ -171,7 +177,12 @@ export default function PlayerManagerPage() {
           )}
           <FileErrorsAlert errors={overview.errors} />
 
-          <StatTiles activeTab={activeTab} online={onlineQuery.data} onSelect={setTab} />
+          <StatTiles
+            activeTab={activeTab}
+            online={onlineQuery.data}
+            withPlayers={profilesView.visible}
+            onSelect={setTab}
+          />
 
           <Card>
             <Tabs
@@ -198,6 +209,11 @@ export default function PlayerManagerPage() {
                     {text('online.tab', {})}
                   </Tabs.Tab>
                 )}
+                {profilesView.visible && (
+                  <Tabs.Tab value='players' leftSection={<FontAwesomeIcon icon={faUsers} />}>
+                    {text('players.tab', {})}
+                  </Tabs.Tab>
+                )}
                 {game.lists.map(({ kind }) => (
                   <Tabs.Tab key={kind} value={kind} leftSection={<FontAwesomeIcon icon={LIST_STYLES[kind].tab} />}>
                     {text(`lists.${kind}.title`, {})}
@@ -208,6 +224,11 @@ export default function PlayerManagerPage() {
               {game.online && (
                 <Tabs.Panel value='online' pt='md'>
                   <OnlineTab access={online} query={onlineQuery} onKicked={removeOnline} />
+                </Tabs.Panel>
+              )}
+              {profilesView.visible && (
+                <Tabs.Panel value='players' pt='md'>
+                  <PlayersTab query={profilesQuery} online={onlineQuery.data} />
                 </Tabs.Panel>
               )}
               {game.lists.map((spec) => (

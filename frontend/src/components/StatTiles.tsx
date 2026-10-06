@@ -1,4 +1,4 @@
-import { faBan, faPlug, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
+import { faBan, faPlug, faUsers, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Skeleton } from '@mantine/core';
 import classNames from 'classnames';
@@ -10,7 +10,7 @@ import { LIST_STYLES } from './listStyles.ts';
 import { usePlayerManager, useText } from './playerManager.ts';
 
 // tailwind needs the full class names in the source
-const COLUMNS = ['', 'lg:grid-cols-1', 'lg:grid-cols-2', 'lg:grid-cols-3', 'lg:grid-cols-4'];
+const COLUMNS = ['', 'lg:grid-cols-1', 'lg:grid-cols-2', 'lg:grid-cols-3', 'lg:grid-cols-4', 'lg:grid-cols-5'];
 
 interface Tile {
   /** The tab the tile opens. */
@@ -87,18 +87,22 @@ export function TilesSkeleton({ count = 4 }: { count?: number }) {
   );
 }
 
-// the online count and one count per list; bans and ip bans share a tile. Each tile opens its tab
+// the online count, the saved players and one count per list; bans and ip bans share a tile. Each tile opens
+// its tab
 export default function StatTiles({
   activeTab,
   online,
+  withPlayers,
   onSelect,
 }: {
   activeTab: string;
   online: OnlinePlayers | undefined;
+  /** Whether there is a players tab (saved profiles). */
+  withPlayers: boolean;
   onSelect: (tab: string) => void;
 }) {
   const text = useText();
-  const { game, overview } = usePlayerManager();
+  const { game, overview, profiles } = usePlayerManager();
   const count = (kind: ListKind) => overview.lists[kind]?.length ?? 0;
   const hasBans = game.lists.some((spec) => spec.kind === 'bans');
   const hasIpBans = game.lists.some((spec) => spec.kind === 'ip_bans');
@@ -119,6 +123,16 @@ export default function StatTiles({
           {max !== null && <span className={suffix}>/ {max}</span>}
         </>
       ),
+    });
+  }
+  if (withPlayers) {
+    tiles.push({
+      tab: 'players',
+      tabs: ['players'],
+      icon: faUsers,
+      color: 'violet',
+      label: text('players.tab', {}),
+      value: profiles?.length ?? '–',
     });
   }
   for (const { kind } of game.lists) {
@@ -152,7 +166,7 @@ export default function StatTiles({
   }
 
   return (
-    <div className={classNames('grid grid-cols-2 gap-3', COLUMNS[Math.min(tiles.length, 4)])}>
+    <div className={classNames('grid grid-cols-2 gap-3', COLUMNS[Math.min(tiles.length, 5)])}>
       {tiles.map((tile, index) => (
         <TileButton
           key={tile.tab}

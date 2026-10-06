@@ -2,12 +2,9 @@
 //! console `list` command and kick with `kick`; the rest lives in [`java`] and [`bedrock`].
 use crate::{
     context::{Actor, Context},
-    model::{
-        Blocked, Capability, KickCapability, Method, MutationResult, Online, Player, ServerState,
-    },
+    model::{Blocked, Capability, KickCapability, Method, MutationResult, ServerState},
     validate,
 };
-use axum::http::StatusCode;
 use regex::Regex;
 use shared::response::ApiResponse;
 use std::sync::LazyLock;
@@ -15,8 +12,14 @@ use std::sync::LazyLock;
 pub mod bedrock;
 mod console;
 pub mod java;
+mod live;
 mod lookup;
+mod nbt;
+mod ping;
+mod profile;
 mod properties;
+mod query;
+mod rcon;
 
 pub const FAMILY: &str = "minecraft";
 const PROPERTIES: &str = "server.properties";
@@ -56,16 +59,19 @@ pub fn java_id(id: &str) -> Option<String> {
 const CONSOLE: &[&str] = &["control.console"];
 const CONSOLE_AND_READ: &[&str] = &["control.console", "control.read-console"];
 const FILES: &[&str] = &["files.create"];
+const READ_FILES: &[&str] = &["files.read-content"];
 
 /// Blocked while the server is starting or stopping.
 fn transition(state: ServerState) -> Option<Blocked> {
     matches!(state, ServerState::Starting | ServerState::Stopping).then_some(Blocked::Transition)
 }
 
+/// Online players come through the query tunnel (no permission beyond the page's), and
+/// through the console only for users who may use it.
 fn online_capability(state: ServerState) -> Capability {
     Capability {
-        requires: CONSOLE_AND_READ,
-        visible_with: CONSOLE_AND_READ,
+        requires: &[],
+        visible_with: &[],
         blocked: match state {
             ServerState::Running => None,
             ServerState::Offline => Some(Blocked::NotRunning),
@@ -85,31 +91,6 @@ fn kick_capability(state: ServerState) -> KickCapability {
     }
 }
 
-/// The players online, from the answer to the first of `commands` that gets one.
-async fn online(
-    ctx: &Context<'_>,
-    actor: &Actor<'_>,
-    commands: &[&str],
-) -> Result<Online, ApiResponse> {
-    for command in commands {
-        if let Some(answer) = ctx.ask(actor, command, console::parse_list).await? {
-            return Ok(Online {
-                count: answer.count,
-                max: answer.max,
-                players: answer
-                    .players
-                    .into_iter()
-                    .map(|(name, id)| Player { name, id })
-                    .collect(),
-            });
-        }
-    }
-    Err(
-        ApiResponse::error("the server did not answer the list command")
-            .with_status(StatusCode::GATEWAY_TIMEOUT),
-    )
-}
-
 /// The `kick` command; Bedrock needs quotes around gamertags with spaces (Java names have none).
 fn kick_command(name: &str, reason: Option<&str>) -> String {
     let target = if name.contains(' ') {
@@ -123,6 +104,7 @@ fn kick_command(name: &str, reason: Option<&str>) -> String {
     }
 }
 
+/// Kicks through the console.
 async fn kick(
     ctx: &Context<'_>,
     actor: &Actor<'_>,
@@ -133,6 +115,7 @@ async fn kick(
     Ok(MutationResult {
         method: Method::Command,
         restart_required: false,
+        message: None,
     })
 }
 

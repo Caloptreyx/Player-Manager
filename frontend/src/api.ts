@@ -5,7 +5,9 @@ import {
   BLOCKED,
   type Capability,
   type Entry,
+  GAMEMODES,
   type Game,
+  type Item,
   type KickCapability,
   LIST_KINDS,
   type ListKind,
@@ -13,9 +15,15 @@ import {
   METHODS,
   type MethodCapability,
   type MutationResult,
+  ONLINE_SOURCES,
   type OnlinePlayers,
   type Overview,
   type Player,
+  type Position,
+  type Profile,
+  type ProfileAction,
+  type ProfileSummary,
+  type ProfilesSpec,
   SERVER_STATES,
 } from './lib/model.ts';
 
@@ -64,6 +72,12 @@ const listSpecSchema: z.ZodType<ListSpec> = z.object({
   bypasses_player_limit: z.boolean(),
 });
 
+const profilesSpecSchema: z.ZodType<ProfilesSpec> = z.object({
+  view: capabilitySchema,
+  edit_offline: capabilitySchema.nullable(),
+  edit_live: capabilitySchema.nullable(),
+});
+
 const gameSchema: z.ZodType<Game> = z.object({
   id: z.string(),
   family: z.string(),
@@ -74,6 +88,7 @@ const gameSchema: z.ZodType<Game> = z.object({
   whitelist_toggle: methodCapabilitySchema.nullable(),
   online: capabilitySchema.nullable(),
   kick: kickCapabilitySchema.nullable(),
+  profiles: profilesSpecSchema.nullable(),
 });
 
 const overviewSchema: z.ZodType<Overview> = z.object({
@@ -93,11 +108,64 @@ const onlinePlayersSchema: z.ZodType<OnlinePlayers> = z.object({
   count: z.number(),
   max: z.number(),
   players: z.array(playerSchema),
+  source: z.enum(ONLINE_SOURCES),
+  complete: z.boolean(),
 });
 
 const mutationResultSchema: z.ZodType<MutationResult> = z.object({
   method: z.enum(METHODS),
   restart_required: z.boolean(),
+  message: z.string().nullable(),
+});
+
+const profileSummarySchema: z.ZodType<ProfileSummary> = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  last_saved: z.string(),
+});
+
+const positionSchema: z.ZodType<Position> = z.object({
+  x: z.number(),
+  y: z.number(),
+  z: z.number(),
+  dimension: z.string(),
+});
+
+const itemSchema: z.ZodType<Item> = z.object({
+  slot: z.string(),
+  id: z.string(),
+  count: z.number(),
+  name: z.string().nullable(),
+  enchantments: z.array(z.object({ id: z.string(), level: z.number() })),
+  damage: z.number().nullable(),
+  snbt: z.string(),
+});
+
+const profileSchema: z.ZodType<Profile> = z.object({
+  id: z.string(),
+  name: z.string().nullable(),
+  last_saved: z.string(),
+  data_version: z.number().nullable(),
+  gamemode: z.enum(GAMEMODES).nullable(),
+  health: z.number().nullable(),
+  max_health: z.number().nullable(),
+  food: z.number().nullable(),
+  saturation: z.number().nullable(),
+  xp_level: z.number().nullable(),
+  xp_progress: z.number().nullable(),
+  xp_total: z.number().nullable(),
+  position: positionSchema.nullable(),
+  spawn: positionSchema.nullable(),
+  effects: z.array(z.object({ id: z.string(), amplifier: z.number(), duration: z.number() })),
+  inventory: z.array(itemSchema),
+  ender_chest: z.array(itemSchema),
+  stats: z.record(z.string(), z.record(z.string(), z.number())).nullable(),
+  advancements: z
+    .object({
+      done: z.number(),
+      items: z.array(z.object({ id: z.string(), done_at: z.string().nullable() })),
+    })
+    .nullable(),
 });
 
 export const getOverview = async (serverUuid: string): Promise<Overview> => {
@@ -108,6 +176,16 @@ export const getOverview = async (serverUuid: string): Promise<Overview> => {
 export const getOnlinePlayers = async (serverUuid: string): Promise<OnlinePlayers> => {
   const { data } = await axiosInstance.get(`${playerManagerBase(serverUuid)}/online`);
   return onlinePlayersSchema.parse(data);
+};
+
+export const getProfiles = async (serverUuid: string): Promise<ProfileSummary[]> => {
+  const { data } = await axiosInstance.get(`${playerManagerBase(serverUuid)}/profiles`);
+  return z.object({ players: z.array(profileSummarySchema) }).parse(data).players;
+};
+
+export const getProfile = async (serverUuid: string, id: string): Promise<Profile> => {
+  const { data } = await axiosInstance.get(`${playerManagerBase(serverUuid)}/profiles/${encodeURIComponent(id)}`);
+  return profileSchema.parse(data);
 };
 
 const mutate = async (
@@ -133,3 +211,6 @@ export const setWhitelistEnabled = (serverUuid: string, enabled: boolean) =>
 
 export const kickPlayer = (serverUuid: string, body: { name: string; reason?: string }) =>
   mutate('post', serverUuid, '/kick', body);
+
+export const runProfileAction = (serverUuid: string, id: string, body: ProfileAction) =>
+  mutate('post', serverUuid, `/profiles/${encodeURIComponent(id)}/actions`, body);

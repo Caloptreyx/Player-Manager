@@ -73,6 +73,15 @@ export const withoutPlayer = (online: OnlinePlayers, name: string): OnlinePlayer
   return { ...online, players, count: Math.max(0, online.count - (online.players.length - players.length)) };
 };
 
+export const ONLINE_REFRESH_MS = 15_000;
+
+/**
+ * How often the online list refreshes by itself: never after an error or when the last answer came from the
+ * console (every fetch would run `list` there); the query protocols, RCON and the ping are silent.
+ */
+export const onlineRefreshInterval = (last: OnlinePlayers | undefined, failed: boolean): number | false =>
+  last !== undefined && !failed && last.source !== 'console' ? ONLINE_REFRESH_MS : false;
+
 /** Delay before refetching the overview: console commands make the server write its files asynchronously. */
 export const COMMAND_REFETCH_DELAY_MS = 1500;
 export const refetchDelay = (method: Method): number => (method === 'command' ? COMMAND_REFETCH_DELAY_MS : 0);

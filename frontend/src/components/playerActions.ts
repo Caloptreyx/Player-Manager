@@ -1,4 +1,5 @@
 import {
+  faAddressCard,
   faBan,
   faDoorOpen,
   faListCheck,
@@ -7,11 +8,12 @@ import {
   faUserSlash,
   type IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
+import { useNavigate } from 'react-router';
 import { addToList, kickPlayer, removeFromList } from '../api.ts';
 import type { Access } from '../lib/access.ts';
 import { addBody, removeBody } from '../lib/lists.ts';
 import type { ListKind } from '../lib/model.ts';
-import { type PlayerRef, playerStatus } from '../lib/players.ts';
+import { type PlayerRef, playerStatus, samePlayer } from '../lib/players.ts';
 import { usePlayerManager, useText } from './playerManager.ts';
 
 export interface PlayerAction {
@@ -25,16 +27,17 @@ export interface PlayerAction {
 }
 
 /**
- * What can be done with a player besides the row's own list: whitelist and operator toggles, ban and kick, as
- * far as the game supports them. `except` leaves out the list a row belongs to; `onGone` runs after a ban or
- * kick disconnected the player; `kick` only makes sense for online players.
+ * What can be done with a player besides the row's own list: open the saved profile, whitelist and operator
+ * toggles, ban and kick, as far as the game supports them. `except` leaves out the list a row belongs to;
+ * `onGone` runs after a ban or kick disconnected the player; `kick` only makes sense for online players.
  */
 export function usePlayerActions(
   player: PlayerRef,
   { except, kick: withKick = false, onGone }: { except?: ListKind; kick?: boolean; onGone?: (name: string) => void },
 ): PlayerAction[] {
   const text = useText();
-  const { serverUuid, game, ui, overview, editAccess, kickAccess, run, confirm } = usePlayerManager();
+  const { serverUuid, game, ui, overview, editAccess, kickAccess, profiles, run, confirm } = usePlayerManager();
+  const navigate = useNavigate();
   const status = playerStatus(overview.lists, player);
   const { id } = player;
   const label = player.name ?? id ?? '';
@@ -48,6 +51,18 @@ export function usePlayerActions(
   // adds go by name; a Bedrock operator known only by xuid cannot be added elsewhere
   const name = player.name;
   const actions: PlayerAction[] = [];
+
+  // only players the server saved data of have a profile
+  const profile = profiles?.find((summary) => samePlayer(summary, player));
+  if (profile) {
+    actions.push({
+      key: 'profile',
+      icon: faAddressCard,
+      label: text('profile.view', {}),
+      access: { visible: true, blocker: null },
+      onClick: () => navigate(encodeURIComponent(profile.id), { relative: 'path' }),
+    });
+  }
 
   if (whitelist && listed) {
     actions.push({

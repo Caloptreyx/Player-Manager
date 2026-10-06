@@ -1,5 +1,6 @@
-//! Server access through Wings (files, power state, console), with the same checks and error
-//! mapping as the panel's own routes.
+//! Server access through Wings (files, power state, console, query tunnels), with the same
+//! checks and error mapping as the panel's own routes.
+use crate::{tunnel::TunnelError, validate};
 use axum::http::StatusCode;
 use shared::{
     ApiError, State,
@@ -7,13 +8,26 @@ use shared::{
     response::ApiResponse,
 };
 use tokio::io::AsyncReadExt;
-use wings_api::client::{ApiHttpError, AsyncRequestReader, WingsClient};
+use wings_api::{
+    client::{ApiHttpError, AsyncRequestReader, WingsClient},
+    tunnel::{QueryTcpTunnel, QueryUdpTunnel},
+};
 
 const LIST_PER_PAGE: u64 = 100;
 const LIST_MAX_PAGES: u64 = 50;
 
 fn wings_status(status: StatusCode, err: wings_api::ApiError) -> ApiResponse {
     ApiResponse::new_serialized(ApiError::new_wings_value(err)).with_status(status)
+}
+
+fn tunnel_error(err: ApiHttpError) -> TunnelError {
+    TunnelError::failed(match err {
+        ApiHttpError::Http(status, err) => {
+            format!("Wings could not open a tunnel ({status}): {}", err.error)
+        }
+        ApiHttpError::WebSocket(err) => format!("Wings could not open a tunnel: {err}"),
+        other => format!("Wings could not open a tunnel: {other:?}"),
+    })
 }
 
 pub struct Wings<'a> {
@@ -28,7 +42,8 @@ impl<'a> Wings<'a> {
             .fetch_cached(&state.database)
             .await?
             .api_client(&state.database)
-            .await?;
+            .await?
+            .ignoring(server.subuser_ignored_files.clone().unwrap_or_default());
         Ok(Self { client, server })
     }
 
@@ -36,11 +51,12 @@ impl<'a> Wings<'a> {
         self.server.subuser_ignored_files.clone()
     }
 
-    /// Every entry of the directory (up to [`LIST_MAX_PAGES`] pages).
+    /// Every entry of the directory (up to [`LIST_MAX_PAGES`] pages); `None` when it does not
+    /// exist.
     pub async fn list(
         &self,
         directory: &str,
-    ) -> Result<Vec<wings_api::DirectoryEntry>, ApiResponse> {
+    ) -> Result<Option<Vec<wings_api::DirectoryEntry>>, ApiResponse> {
         let mut query = wings_api::servers_server_files_list::get::Query {
             directory: Some(directory.into()),
             ignored: self.ignored(),
@@ -56,9 +72,7 @@ impl<'a> Wings<'a> {
                 .await
             {
                 Ok(response) => response,
-                Err(ApiHttpError::Http(StatusCode::NOT_FOUND, err)) => {
-                    return Err(wings_status(StatusCode::NOT_FOUND, err));
-                }
+                Err(ApiHttpError::Http(StatusCode::NOT_FOUND, _)) => return Ok(None),
                 Err(err) => return Err(err.into()),
             };
             let received = response.entries.len() as u64;
@@ -67,7 +81,31 @@ impl<'a> Wings<'a> {
                 break;
             }
         }
-        Ok(entries)
+        Ok(Some(entries))
+    }
+
+    /// The entry of the file `name` in `directory`; `None` when either does not exist.
+    pub async fn stat(
+        &self,
+        directory: &str,
+        name: &str,
+    ) -> Result<Option<wings_api::DirectoryEntry>, ApiResponse> {
+        let request_body = wings_api::servers_server_files_stat::post::RequestBody {
+            root: directory.into(),
+            files: vec![name.into()],
+        };
+        match self
+            .client
+            .post_servers_server_files_stat(self.server.uuid, &request_body)
+            .await
+        {
+            Ok(response) => Ok(response
+                .entries
+                .into_iter()
+                .find(|entry| entry.name == name && !entry.directory)),
+            Err(ApiHttpError::Http(StatusCode::NOT_FOUND, _)) => Ok(None),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// The file's bytes, at most `max_size` of them (413 beyond); `None` when it does not exist.
@@ -144,18 +182,19 @@ impl<'a> Wings<'a> {
             .state)
     }
 
-    /// Sends one console command and logs it like the panel's console route does. Commands
-    /// with control characters (newlines would inject further commands) are refused.
-    pub async fn command(
+    /// Sends console commands in one request and logs each like the panel's console route
+    /// does. Commands with control characters (newlines would inject further commands) are
+    /// refused.
+    pub async fn commands(
         &self,
         activity_logger: &ServerActivityLogger,
-        command: &str,
+        commands: &[&str],
     ) -> Result<(), ApiResponse> {
-        if command.is_empty() || command.chars().any(char::is_control) {
-            return Err(ApiResponse::error("invalid command"));
+        for command in commands {
+            validate::command(command)?;
         }
         let request_body = wings_api::servers_server_commands::post::RequestBody {
-            commands: vec![command.into()],
+            commands: commands.iter().map(|&command| command.into()).collect(),
         };
         match self
             .client
@@ -168,12 +207,14 @@ impl<'a> Wings<'a> {
             }
             Err(err) => return Err(err.into()),
         }
-        activity_logger
-            .log(
-                "server:console.command",
-                serde_json::json!({ "command": command }),
-            )
-            .await;
+        for command in commands {
+            activity_logger
+                .log(
+                    "server:console.command",
+                    serde_json::json!({ "command": command }),
+                )
+                .await;
+        }
         Ok(())
     }
 
@@ -192,5 +233,33 @@ impl<'a> Wings<'a> {
         let mut data = Vec::new();
         reader.read_to_end(&mut data).await?;
         Ok(String::from_utf8_lossy(&data).into_owned())
+    }
+
+    /// The port of the primary allocation and the address players use with it (its alias, or
+    /// its IP).
+    pub fn address(&self) -> Option<(String, u16)> {
+        let allocation = &self.server.allocation.as_ref()?.allocation;
+        let port = u16::try_from(allocation.port).ok()?;
+        let host = match allocation.ip_alias.as_deref() {
+            Some(alias) => alias.to_string(),
+            None => allocation.ip.ip().to_string(),
+        };
+        Some((host, port))
+    }
+
+    /// A TCP tunnel to `port` of the server's container (no timeout of its own).
+    pub async fn tcp(&self, port: u16) -> Result<QueryTcpTunnel, TunnelError> {
+        self.client
+            .open_tunnel_tcp(self.server.uuid, port)
+            .await
+            .map_err(tunnel_error)
+    }
+
+    /// A UDP tunnel to `port` of the server's container (`recv` times out after 5 s).
+    pub async fn udp(&self, port: u16) -> Result<QueryUdpTunnel, TunnelError> {
+        self.client
+            .open_tunnel_udp(self.server.uuid, port)
+            .await
+            .map_err(tunnel_error)
     }
 }

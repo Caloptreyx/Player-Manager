@@ -3,16 +3,16 @@
 //! editing the files.
 use super::{
     CONSOLE, FAMILY, FILES, JAVA_NAME, PROPERTIES, SCORE_JAVA_FILES, SCORE_SHARED_FILES, UUID,
-    java_id, lookup, properties,
+    java_id, live, lookup, profile, properties,
 };
 use crate::{
     context::{Actor, Context, list_not_supported, player_not_found},
-    games::{Add, Contents, Game, Selector, Subject},
+    games::{Add, Contents, Game, ProfileAction, ProfileMode, Selector, Subject},
     lists::{self, Object},
     model::{
         Capability, Descriptor, Entry, IdField, Info, Levels, ListKind, ListSpec, ListTarget,
-        Method, MethodCapability, MutationResult, Online, Player, PlayerId, PlayerName,
-        ServerState,
+        Method, MethodCapability, MutationResult, Online, Player, PlayerId, PlayerName, Profile,
+        ProfileSummary, ServerState,
     },
 };
 use axum::http::StatusCode;
@@ -26,7 +26,7 @@ const WHITELIST: &str = "whitelist.json";
 const OPS: &str = "ops.json";
 const BANS: &str = "banned-players.json";
 const IP_BANS: &str = "banned-ips.json";
-const USERCACHE: &str = "usercache.json";
+pub(super) const USERCACHE: &str = "usercache.json";
 
 /// Files only a Java server creates.
 const OWN_FILES: [&str; 5] = [OPS, BANS, IP_BANS, USERCACHE, "eula.txt"];
@@ -128,6 +128,7 @@ pub(crate) fn descriptor(state: ServerState, default_level: u8) -> Descriptor {
         whitelist_toggle: Some(MethodCapability { access, method }),
         online: Some(super::online_capability(state)),
         kick: Some(super::kick_capability(state)),
+        profiles: Some(profile::spec(state)),
     }
 }
 
@@ -172,7 +173,7 @@ fn with_reason(command: String, reason: Option<&str>) -> String {
 }
 
 /// Players of a `usercache.json`.
-fn usercache_players(entries: &[Value]) -> Vec<Player> {
+pub(super) fn usercache_players(entries: &[Value]) -> Vec<Player> {
     lists::objects(entries)
         .filter_map(|entry| {
             Some(Player {
@@ -268,10 +269,12 @@ async fn resolve(
     Ok((canonical, uuid))
 }
 
-fn done(method: Method) -> Result<MutationResult, ApiResponse> {
+/// The result of a file edit.
+fn edited() -> Result<MutationResult, ApiResponse> {
     Ok(MutationResult {
-        method,
+        method: Method::File,
         restart_required: false,
+        message: None,
     })
 }
 
@@ -357,8 +360,7 @@ impl Game for MinecraftJava {
     }
 
     async fn online(&self, ctx: &Context<'_>, actor: &Actor<'_>) -> Result<Online, ApiResponse> {
-        // `list uuids` adds the UUIDs; servers without it answer `list`
-        super::online(ctx, actor, &["minecraft:list uuids", "list"]).await
+        live::java(ctx, actor).await
     }
 
     async fn add(
@@ -373,9 +375,8 @@ impl Game for MinecraftJava {
         let (name, id) = match add.subject {
             Subject::Ip(ip) if spec.kind == ListKind::IpBans => {
                 if method == Method::Command {
-                    ctx.command(actor, &with_reason(format!("ban-ip {ip}"), reason))
-                        .await?;
-                    return done(method);
+                    let command = with_reason(format!("ban-ip {ip}"), reason);
+                    return live::run(ctx, actor, &[command.as_str()]).await;
                 }
                 let created = ban_created();
                 let mut entries = ctx.load_list(IP_BANS).await?;
@@ -391,7 +392,7 @@ impl Game for MinecraftJava {
                     },
                 );
                 ctx.write_list(IP_BANS, &entries, actor).await?;
-                return done(method);
+                return edited();
             }
             Subject::Player { name, id } if spec.kind != ListKind::IpBans => (name, id),
             _ => return Err(list_not_supported()),
@@ -403,8 +404,7 @@ impl Game for MinecraftJava {
                 ListKind::Operators => format!("op {name}"),
                 ListKind::Bans | ListKind::IpBans => with_reason(format!("ban {name}"), reason),
             };
-            ctx.command(actor, &command).await?;
-            return done(method);
+            return live::run(ctx, actor, &[command.as_str()]).await;
         }
 
         let (name, uuid) = resolve(ctx, &name, id).await?;
@@ -449,7 +449,7 @@ impl Game for MinecraftJava {
             },
         );
         ctx.write_list(file, &entries, actor).await?;
-        done(method)
+        edited()
     }
 
     async fn remove(
@@ -463,8 +463,7 @@ impl Game for MinecraftJava {
         let (name, id) = match selector {
             Selector::Ip(ip) if spec.kind == ListKind::IpBans => {
                 if method == Method::Command {
-                    ctx.command(actor, &format!("pardon-ip {ip}")).await?;
-                    return done(method);
+                    return live::run(ctx, actor, &[format!("pardon-ip {ip}").as_str()]).await;
                 }
                 let mut entries = ctx.load_list(IP_BANS).await?;
                 if lists::remove(&mut entries, |entry| bans_ip(entry, ip)) == 0 {
@@ -473,7 +472,7 @@ impl Game for MinecraftJava {
                     );
                 }
                 ctx.write_list(IP_BANS, &entries, actor).await?;
-                return done(method);
+                return edited();
             }
             Selector::Player { name, id } if spec.kind != ListKind::IpBans => (name, id),
             _ => return Err(list_not_supported()),
@@ -499,8 +498,7 @@ impl Game for MinecraftJava {
                 ListKind::Operators => "deop",
                 ListKind::Bans | ListKind::IpBans => "pardon",
             };
-            ctx.command(actor, &format!("{command} {name}")).await?;
-            return done(method);
+            return live::run(ctx, actor, &[format!("{command} {name}").as_str()]).await;
         }
 
         let mut entries = ctx.load_list(file).await?;
@@ -514,7 +512,7 @@ impl Game for MinecraftJava {
             return Err(player_not_found());
         }
         ctx.write_list(file, &entries, actor).await?;
-        done(method)
+        edited()
     }
 
     async fn set_whitelist(
@@ -530,8 +528,7 @@ impl Game for MinecraftJava {
             } else {
                 "whitelist off"
             };
-            ctx.command(actor, command).await?;
-            return done(method);
+            return live::run(ctx, actor, &[command]).await;
         }
 
         let content = ctx.read_text(PROPERTIES).await?.unwrap_or_default();
@@ -543,9 +540,10 @@ impl Game for MinecraftJava {
         if updated != content {
             ctx.write(PROPERTIES, updated, actor).await?;
         }
-        done(method)
+        edited()
     }
 
+    /// Over RCON when usable, like every Java command.
     async fn kick(
         &self,
         ctx: &Context<'_>,
@@ -553,7 +551,26 @@ impl Game for MinecraftJava {
         name: &str,
         reason: Option<&str>,
     ) -> Result<MutationResult, ApiResponse> {
-        super::kick(ctx, actor, name, reason).await
+        live::run(ctx, actor, &[super::kick_command(name, reason).as_str()]).await
+    }
+
+    async fn profiles(&self, ctx: &Context<'_>) -> Result<Vec<ProfileSummary>, ApiResponse> {
+        profile::list(ctx).await
+    }
+
+    async fn profile(&self, ctx: &Context<'_>, id: &str) -> Result<Profile, ApiResponse> {
+        profile::load(ctx, id).await
+    }
+
+    async fn profile_action(
+        &self,
+        ctx: &Context<'_>,
+        actor: &Actor<'_>,
+        id: &str,
+        mode: ProfileMode,
+        action: ProfileAction,
+    ) -> Result<MutationResult, ApiResponse> {
+        profile::act(ctx, actor, id, mode, action).await
     }
 }
 

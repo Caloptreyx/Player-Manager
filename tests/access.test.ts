@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { capabilityAccess, editHint } from '../frontend/src/lib/access.ts';
+import { capabilityAccess, editHint, gamePermissions } from '../frontend/src/lib/access.ts';
 import { bedrockGame, javaGame } from './fixtures.ts';
 
 const all = new Set(['control.console', 'control.read-console', 'files.create']);
@@ -31,10 +31,18 @@ describe('capabilityAccess', () => {
   });
 
   test('visible with any of visible_with, blocked by whichever required permission is missing', () => {
-    const online = javaGame('running').online;
-    assert.deepEqual(capabilityAccess(online, new Set(['control.console'])), { visible: true, blocker: 'noReadConsole' });
-    assert.equal(capabilityAccess(online, filesOnly).visible, false);
+    const live = javaGame('running').profiles?.edit_live ?? null;
+    assert.deepEqual(capabilityAccess(live, consoleOnly), { visible: true, blocker: null });
+    assert.deepEqual(capabilityAccess(live, filesOnly), { visible: false, blocker: 'noConsole' });
     assert.equal(capabilityAccess(javaGame('running').kick, filesOnly).visible, false);
+  });
+
+  test('an empty visible_with needs nothing beyond the page permission', () => {
+    assert.deepEqual(capabilityAccess(javaGame('running').online, new Set()), { visible: true, blocker: null });
+    assert.deepEqual(capabilityAccess(bedrockGame('offline').online, new Set()), {
+      visible: true,
+      blocker: 'notRunning',
+    });
   });
 
   test('permissions without a dedicated text fall back to the generic blocker', () => {
@@ -44,6 +52,17 @@ describe('capabilityAccess', () => {
 
   test('a capability the game lacks is hidden', () => {
     assert.deepEqual(capabilityAccess(null, all), { visible: false, blocker: null });
+  });
+});
+
+describe('gamePermissions', () => {
+  test('include the permissions of the profile capabilities', () => {
+    assert.deepEqual(gamePermissions(javaGame('running')).sort(), [
+      'control.console',
+      'files.create',
+      'files.read-content',
+    ]);
+    assert.deepEqual(gamePermissions(bedrockGame('running')).sort(), ['control.console', 'files.create']);
   });
 });
 

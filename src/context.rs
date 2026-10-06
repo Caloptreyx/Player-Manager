@@ -1,12 +1,13 @@
 //! What every route needs about a server: its Wings connection, power state, root files and
-//! detected game; file and console access logged like the panel's own routes; capability
-//! enforcement. Nothing here knows about a particular game.
+//! detected game; file and console access logged like the panel's own routes; query tunnels;
+//! capability enforcement. Nothing here knows about a particular game.
 use crate::{
     console,
     files::Wings,
     games::{self, Game},
     lists,
     model::{Blocked, Capability, ServerState},
+    tunnel::TunnelError,
 };
 use axum::http::StatusCode;
 use serde_json::Value;
@@ -20,6 +21,10 @@ use shared::{
 };
 use std::{collections::HashSet, time::Duration};
 use tokio::time::Instant;
+use wings_api::{
+    DirectoryEntry,
+    tunnel::{QueryTcpTunnel, QueryUdpTunnel},
+};
 
 /// Console lines read for player suggestions.
 const LOG_LINES: u64 = 1000;
@@ -35,6 +40,10 @@ pub fn conflict(message: &str) -> ApiResponse {
 
 pub fn player_not_found() -> ApiResponse {
     ApiResponse::error("player not found").with_status(StatusCode::NOT_FOUND)
+}
+
+pub fn profile_not_found() -> ApiResponse {
+    ApiResponse::error("profile not found").with_status(StatusCode::NOT_FOUND)
 }
 
 pub fn unprocessable(message: impl AsRef<str>) -> ApiResponse {
@@ -92,6 +101,10 @@ impl<'a> Context<'a> {
     pub async fn load(state: &State, server: &'a Server) -> Result<Self, ApiResponse> {
         let wings = Wings::connect(state, server).await?;
         let (power_state, entries) = tokio::try_join!(wings.power_state(), wings.list("/"))?;
+        let entries = entries.ok_or_else(|| {
+            ApiResponse::error("the server's files were not found")
+                .with_status(StatusCode::NOT_FOUND)
+        })?;
         let root: HashSet<String> = entries
             .into_iter()
             .filter(|entry| !entry.directory)
@@ -126,7 +139,26 @@ impl<'a> Context<'a> {
         if !self.has(name) {
             return Ok(None);
         }
-        self.wings.read(&format!("/{name}"), self.max_size).await
+        self.read_file(name).await
+    }
+
+    /// A file anywhere below the server root (`path` relative to it); `None` when missing.
+    pub async fn read_file(&self, path: &str) -> Result<Option<Vec<u8>>, ApiResponse> {
+        self.wings.read(&format!("/{path}"), self.max_size).await
+    }
+
+    /// The entries of a directory below the server root; `None` when it does not exist.
+    pub async fn list(&self, directory: &str) -> Result<Option<Vec<DirectoryEntry>>, ApiResponse> {
+        self.wings.list(&format!("/{directory}")).await
+    }
+
+    /// The entry of the file `name` in a directory below the server root; `None` when missing.
+    pub async fn stat(
+        &self,
+        directory: &str,
+        name: &str,
+    ) -> Result<Option<DirectoryEntry>, ApiResponse> {
+        self.wings.stat(&format!("/{directory}"), name).await
     }
 
     /// The root file as text for editing (422 when it is not UTF-8); `None` when missing.
@@ -179,15 +211,23 @@ impl<'a> Context<'a> {
         content: String,
         actor: &Actor<'_>,
     ) -> Result<(), ApiResponse> {
+        self.write_file(name, content.into_bytes(), actor).await
+    }
+
+    /// Writes a file anywhere below the server root as the actor and logs it like the panel's
+    /// file write route.
+    pub async fn write_file(
+        &self,
+        path: &str,
+        content: Vec<u8>,
+        actor: &Actor<'_>,
+    ) -> Result<(), ApiResponse> {
         if content.len() as u64 > self.max_size {
-            return Err(ApiResponse::error(format!("{name} would be too large"))
+            return Err(ApiResponse::error(format!("{path} would be too large"))
                 .with_status(StatusCode::PAYLOAD_TOO_LARGE));
         }
-        let path = format!("/{name}");
-        let revision_id = self
-            .wings
-            .write(&path, actor.user, content.into_bytes())
-            .await?;
+        let path = format!("/{path}");
+        let revision_id = self.wings.write(&path, actor.user, content).await?;
         actor
             .activity_logger
             .log(
@@ -208,7 +248,13 @@ impl<'a> Context<'a> {
     }
 
     pub async fn command(&self, actor: &Actor<'_>, command: &str) -> Result<(), ApiResponse> {
-        self.wings.command(actor.activity_logger, command).await
+        self.commands(actor, &[command]).await
+    }
+
+    /// Sends the commands to the console in one request, each logged like the panel's console
+    /// route does.
+    pub async fn commands(&self, actor: &Actor<'_>, commands: &[&str]) -> Result<(), ApiResponse> {
+        self.wings.commands(actor.activity_logger, commands).await
     }
 
     /// Sends `command` only when the server is running (e.g. making it reread a file).
@@ -261,5 +307,21 @@ impl<'a> Context<'a> {
                 Vec::new()
             }
         }
+    }
+
+    /// The port of the primary allocation and the address players use with it.
+    pub fn address(&self) -> Option<(String, u16)> {
+        self.wings.address()
+    }
+
+    /// A TCP tunnel to `port` of the server's container; wrap the exchange in
+    /// [`crate::tunnel::bounded`].
+    pub async fn tcp(&self, port: u16) -> Result<QueryTcpTunnel, TunnelError> {
+        self.wings.tcp(port).await
+    }
+
+    /// A UDP tunnel to `port` of the server's container.
+    pub async fn udp(&self, port: u16) -> Result<QueryUdpTunnel, TunnelError> {
+        self.wings.udp(port).await
     }
 }

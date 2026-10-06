@@ -1,11 +1,53 @@
-import type { ListSpec } from '../lib/model.ts';
+import type { ListSpec, Profile } from '../lib/model.ts';
 import type { PlayerRef } from '../lib/players.ts';
+import { prettifyId, type StatFormat } from '../lib/profiles.ts';
 import type { ExtT, ExtValues, GenericKey, Wording } from '../translations.ts';
 import minecraftBedrock from './minecraftBedrock.ts';
 import minecraftJava from './minecraftJava.ts';
 
 // the page renders everything from the game descriptor of the overview; these optional modules only add what
-// the descriptor cannot carry (names, avatars, wording), so a game without one still works with the defaults
+// the descriptor cannot carry (names, avatars, item icons, stat meanings, wording), so a game without one still
+// works with the defaults
+
+/** What a key stat counts, which picks its icon (a name rather than an icon, so the tests load the modules). */
+export type HighlightIcon =
+  | 'time'
+  | 'death'
+  | 'mobKill'
+  | 'playerKill'
+  | 'walk'
+  | 'run'
+  | 'fly'
+  | 'jump'
+  | 'attack'
+  | 'defense';
+
+export interface StatHighlight {
+  key: string;
+  label: string;
+  icon: HighlightIcon;
+  value: number;
+  format: StatFormat;
+}
+
+/** What the profile view needs to know about the game's items, worlds and stats. */
+export interface ProfileUi {
+  /** Rendered icon of an item id; null shows a tile with the initials of the id. */
+  itemIcon: (id: string) => string | null;
+  /** Full-body render of a player, `size` pixels tall; null shows the avatar. */
+  bodyUrl: (player: PlayerRef, size: number) => string | null;
+  /** Name of a dimension or world id. */
+  dimensionLabel: (t: ExtT, id: string) => string;
+  /** The key stats shown above the tables. */
+  statHighlights: (t: ExtT, stats: NonNullable<Profile['stats']>) => StatHighlight[];
+  /** The stats categories present, in display order, with their labels. */
+  statCategories: (t: ExtT, present: string[]) => { id: string; label: string }[];
+  statFormat: (category: string, key: string) => StatFormat;
+  /** Name of a stat key (the custom stats) or of the block, item or mob it counts. */
+  statLabel: (key: string) => string;
+  /** Icon of the block, item or mob a stat counts; null for none. */
+  statIcon: (category: string, key: string) => string | null;
+}
 
 export interface GameUi {
   /** Display name in the header; product names stay untranslated. */
@@ -24,6 +66,7 @@ export interface GameUi {
   addFormNote: (t: ExtT, spec: ListSpec) => string | null;
   /** Informational lines under the lists, e.g. why a list players look for does not exist. */
   notes: (t: ExtT) => string[];
+  profile: ProfileUi;
 }
 
 /** A per-game module: the name plus whatever differs from the generic UI. */
@@ -37,6 +80,16 @@ const GENERIC: Omit<GameUi, 'name'> = {
   isOperatorLevel: () => true,
   addFormNote: () => null,
   notes: () => [],
+  profile: {
+    itemIcon: () => null,
+    bodyUrl: () => null,
+    dimensionLabel: (_t, id) => prettifyId(id),
+    statHighlights: () => [],
+    statCategories: (_t, present) => [...present].sort().map((id) => ({ id, label: prettifyId(id) })),
+    statFormat: () => 'count',
+    statLabel: prettifyId,
+    statIcon: () => null,
+  },
 };
 
 /** Keyed by `Game.id`. */
