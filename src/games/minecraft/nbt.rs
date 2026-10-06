@@ -3,6 +3,7 @@
 //! change nothing but what they touch. Items are shown as SNBT (`Display`).
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use std::{
+    borrow::Cow,
     fmt::{self, Write as _},
     io::{Read, Write as _},
 };
@@ -174,20 +175,23 @@ impl Compound {
     }
 }
 
-/// Decompresses a gzip file.
-pub fn gunzip(data: &[u8]) -> Result<Vec<u8>, String> {
+/// The uncompressed bytes of an NBT file that may be gzipped (by its magic bytes).
+pub fn decompress(data: &[u8]) -> Result<Cow<'_, [u8]>, String> {
+    if !data.starts_with(&[0x1F, 0x8B]) {
+        return Ok(Cow::Borrowed(data));
+    }
     let mut output = Vec::new();
     GzDecoder::new(data)
         .take(MAX_DECOMPRESSED + 1)
         .read_to_end(&mut output)
-        .map_err(|err| format!("not gzip data ({err})"))?;
+        .map_err(|err| format!("broken gzip data ({err})"))?;
     if output.len() as u64 > MAX_DECOMPRESSED {
         return Err(format!(
             "more than {} MiB uncompressed",
             MAX_DECOMPRESSED >> 20
         ));
     }
-    Ok(output)
+    Ok(Cow::Owned(output))
 }
 
 pub fn gzip(data: &[u8]) -> Vec<u8> {
@@ -651,11 +655,14 @@ mod tests {
     }
 
     #[test]
-    fn gzip_round_trip() {
+    fn decompresses_gzip_and_passes_raw_nbt_through() {
         let compressed = gzip(HELLO_WORLD);
         assert_eq!(&compressed[..2], [0x1F, 0x8B]);
-        assert_eq!(gunzip(&compressed).unwrap(), HELLO_WORLD);
-        assert!(gunzip(HELLO_WORLD).is_err());
+        assert_eq!(decompress(&compressed).unwrap(), HELLO_WORLD);
+        // Wings serves gzip files decompressed
+        assert!(
+            matches!(decompress(HELLO_WORLD).unwrap(), Cow::Borrowed(raw) if raw == HELLO_WORLD)
+        );
     }
 
     #[test]

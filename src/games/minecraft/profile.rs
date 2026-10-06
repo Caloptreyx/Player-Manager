@@ -1,6 +1,6 @@
-//! Java player profiles: `<world>/playerdata/<uuid>.dat` (gzipped NBT) with
-//! `<world>/stats/<uuid>.json` and `<world>/advancements/<uuid>.json`, read into a
-//! [`Profile`]; actions edit the NBT of offline players and send commands for online ones.
+//! Java player profiles: the player data file `<uuid>.dat` (NBT) with its statistics and
+//! advancements JSON, read into a [`Profile`]; actions edit the NBT of offline players and
+//! send commands for online ones. See [`Dirs`] for where worlds keep these files.
 //! Handles the item formats before and after 1.20.5 and the equipment layouts before and
 //! after 1.21.5.
 use super::{
@@ -23,6 +23,7 @@ use crate::{
 use serde_json::Value;
 use shared::response::ApiResponse;
 use std::collections::{BTreeMap, HashMap};
+use wings_api::DirectoryEntry;
 
 const DEFAULT_WORLD: &str = "world";
 const OVERWORLD: &str = "minecraft:overworld";
@@ -104,6 +105,62 @@ fn world(content: Option<&str>) -> &str {
         .unwrap_or(DEFAULT_WORLD)
 }
 
+/// Where a world keeps its player files: `players/data`, `players/stats` and
+/// `players/advancements` since Minecraft 26.1, `playerdata`, `stats` and `advancements`
+/// before.
+#[derive(Debug, PartialEq, Eq)]
+struct Dirs {
+    data: String,
+    stats: String,
+    advancements: String,
+}
+
+impl Dirs {
+    /// Both layouts of `world`, the current one first.
+    fn candidates(world: &str) -> [Self; 2] {
+        [
+            Self {
+                data: format!("{world}/players/data"),
+                stats: format!("{world}/players/stats"),
+                advancements: format!("{world}/players/advancements"),
+            },
+            Self {
+                data: format!("{world}/playerdata"),
+                stats: format!("{world}/stats"),
+                advancements: format!("{world}/advancements"),
+            },
+        ]
+    }
+
+    /// The layout `world` uses with the entries of its player data directory; `None` when it
+    /// has neither (no player has joined yet).
+    async fn locate(
+        ctx: &Context<'_>,
+        world: &str,
+    ) -> Result<Option<(Self, Vec<DirectoryEntry>)>, ApiResponse> {
+        for dirs in Self::candidates(world) {
+            if let Some(entries) = ctx.list(&dirs.data).await? {
+                return Ok(Some((dirs, entries)));
+            }
+        }
+        Ok(None)
+    }
+
+    /// The layout that holds `file` in its player data directory, with the file's entry.
+    async fn find(
+        ctx: &Context<'_>,
+        world: &str,
+        file: &str,
+    ) -> Result<Option<(Self, DirectoryEntry)>, ApiResponse> {
+        for dirs in Self::candidates(world) {
+            if let Some(entry) = ctx.stat(&dirs.data, file).await? {
+                return Ok(Some((dirs, entry)));
+            }
+        }
+        Ok(None)
+    }
+}
+
 /// The player id of a player data file: only `<dashed lowercase uuid>.dat` (not `.dat_old`,
 /// temporary or other files).
 fn file_id(name: &str) -> Option<&str> {
@@ -130,9 +187,9 @@ pub async fn list(ctx: &Context<'_>) -> Result<Vec<ProfileSummary>, ApiResponse>
     let (content, usercache) =
         tokio::try_join!(ctx.read_text_lossy(PROPERTIES), ctx.read_list(USERCACHE))?;
     let world = world(content.as_deref());
-    let entries = ctx
-        .list(&format!("{world}/playerdata"))
+    let entries = Dirs::locate(ctx, world)
         .await?
+        .map(|(_, entries)| entries)
         .unwrap_or_default();
     let names = usercache_names(usercache);
     let mut profiles: Vec<ProfileSummary> = entries
@@ -152,9 +209,10 @@ pub async fn list(ctx: &Context<'_>) -> Result<Vec<ProfileSummary>, ApiResponse>
     Ok(profiles)
 }
 
-/// The root tag of a player data file (422 when it does not read).
+/// The root tag of a player data file (422 when it does not read). Minecraft gzips the file;
+/// Wings hands gzip files out decompressed, so both forms are accepted.
 fn decode(data: &[u8]) -> Result<(String, Compound), ApiResponse> {
-    nbt::gunzip(data)
+    nbt::decompress(data)
         .and_then(|raw| nbt::read(&raw))
         .map_err(|err| unprocessable(format!("could not read the player data: {err}")))
 }
@@ -163,15 +221,13 @@ fn decode(data: &[u8]) -> Result<(String, Compound), ApiResponse> {
 pub async fn load(ctx: &Context<'_>, id: &str) -> Result<Profile, ApiResponse> {
     let content = ctx.read_text_lossy(PROPERTIES).await?;
     let world = world(content.as_deref());
-    let directory = format!("{world}/playerdata");
     let file = format!("{id}.dat");
-    let entry = ctx
-        .stat(&directory, &file)
+    let (dirs, entry) = Dirs::find(ctx, world, &file)
         .await?
         .ok_or_else(profile_not_found)?;
-    let data_path = format!("{directory}/{file}");
-    let stats_path = format!("{world}/stats/{id}.json");
-    let advancements_path = format!("{world}/advancements/{id}.json");
+    let data_path = format!("{}/{file}", dirs.data);
+    let stats_path = format!("{}/{id}.json", dirs.stats);
+    let advancements_path = format!("{}/{id}.json", dirs.advancements);
     let (data, stats, advancements, usercache) = tokio::try_join!(
         ctx.read_file(&data_path),
         ctx.read_file(&stats_path),
@@ -213,7 +269,11 @@ async fn edit_file(
     action: &ProfileAction,
 ) -> Result<MutationResult, ApiResponse> {
     let content = ctx.read_text_lossy(PROPERTIES).await?;
-    let path = format!("{}/playerdata/{id}.dat", world(content.as_deref()));
+    let file = format!("{id}.dat");
+    let (dirs, _) = Dirs::find(ctx, world(content.as_deref()), &file)
+        .await?
+        .ok_or_else(profile_not_found)?;
+    let path = format!("{}/{file}", dirs.data);
     let data = ctx.read_file(&path).await?.ok_or_else(profile_not_found)?;
     let (name, mut root) = decode(&data)?;
     if edit(&mut root, action).map_err(conflict)? {
