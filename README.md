@@ -61,7 +61,9 @@ are sent through RCON as well, and the server's reply is shown after each change
 
 ### Player profiles
 
-Profiles read `<level-name>/playerdata/<uuid>.dat`, `stats/<uuid>.json` and `advancements/<uuid>.json`.
+Profiles read the player data (`<uuid>.dat`), statistics and advancements of the `level-name` world: from
+`players/data`, `players/stats` and `players/advancements` (Minecraft 26.1 and later) or `playerdata`,
+`stats` and `advancements` (older versions).
 The server writes them when it autosaves and when the player leaves, so a profile of an online player can
 be a few minutes old; the page shows when it was saved. Changes to an online player are console (or RCON)
 commands. For an offline player, or while the server is stopped, the player file is edited directly.
