@@ -43,8 +43,25 @@ fn number(text: &str) -> Option<(u32, &str)> {
     Some((text[..end].parse().ok()?, &text[end..]))
 }
 
+/// `message` without a plain label some servers put in front of system messages, such as
+/// Paper's `System chat: `: letters and spaces followed by `: `. Player chat (`<Steve> ...`)
+/// never qualifies.
+fn without_label(message: &str) -> &str {
+    if let Some((label, rest)) = message.split_once(": ")
+        && !label.is_empty()
+        && label.chars().all(|c| c.is_ascii_alphabetic() || c == ' ')
+    {
+        rest
+    } else {
+        message
+    }
+}
+
 fn header(message: &str) -> Option<Header<'_>> {
-    let (count, rest) = number(message.strip_prefix("There are ")?)?;
+    let message = message
+        .strip_prefix("There are ")
+        .or_else(|| without_label(message).strip_prefix("There are "))?;
+    let (count, rest) = number(message)?;
     if let Some(rest) = rest.strip_prefix(" of a max of ") {
         let (max, rest) = number(rest)?;
         let names = rest.strip_prefix(" players online:")?;
@@ -173,9 +190,11 @@ mod tests {
     #[test]
     fn parses_empty_answers() {
         let modern = owned(&["[12:00:00 INFO]: There are 0 of a max of 20 players online: "]);
+        let labelled =
+            owned(&["[19:20:24 INFO]: System chat: There are 0 of a max of 20 players online: "]);
         let legacy = owned(&["[12:00:00] [Server thread/INFO]: There are 0/20 players online:"]);
         let bedrock = owned(&["[2026-01-01 12:00:00:000 INFO] There are 0/10 players online:"]);
-        for lines in [modern, legacy] {
+        for lines in [modern, labelled, legacy] {
             assert_eq!(
                 parse_list(&lines),
                 Some(ListAnswer {
@@ -220,6 +239,14 @@ mod tests {
             None
         );
         assert_eq!(parse_list(&owned(&["[12:00:00 INFO]: Done (3.2s)!"])), None);
+        // player chat that imitates an answer, with or without a label in front
+        assert_eq!(
+            parse_list(&owned(&[
+                "[12:00:00 INFO]: <Steve> System chat: There are 9 of a max of 9 players online: x",
+                "[12:00:00 INFO]: [Not Secure] <Steve> There are 9 of a max of 9 players online: x",
+            ])),
+            None
+        );
     }
 
     #[test]
