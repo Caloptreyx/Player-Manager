@@ -11,7 +11,12 @@ export default function FileErrorsAlert({ errors }: { errors: FileError[] }) {
   if (errors.length === 0) return null;
 
   return (
-    <Alert color='red' icon={<FontAwesomeIcon icon={faTriangleExclamation} />} title={text('errors.filesTitle', {})}>
+    <Alert
+      color='red'
+      icon={<FontAwesomeIcon icon={faTriangleExclamation} />}
+      title={text('errors.filesTitle', {})}
+      className='text-sm!'
+    >
       <div className='flex flex-col gap-1 text-sm'>
         <span>{text('errors.filesContent', {})}</span>
         <ul className='flex flex-col gap-0.5'>

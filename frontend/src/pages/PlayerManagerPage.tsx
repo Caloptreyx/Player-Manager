@@ -1,14 +1,13 @@
 import { faCircleInfo, faCubes, faPlug } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { httpErrorToHuman } from '@/api/axios.ts';
 import Button from '@/elements/buttons/Button.tsx';
 import ServerContentContainer from '@/elements/containers/ServerContentContainer.tsx';
 import Card from '@/elements/data-display/Card.tsx';
 import Alert from '@/elements/feedback/Alert.tsx';
 import EmptyState from '@/elements/feedback/EmptyState.tsx';
-import Spinner from '@/elements/feedback/Spinner.tsx';
 import Tabs from '@/elements/layout/Tabs.tsx';
 import { useServerPermissions } from '@/plugins/usePermissions.ts';
 import { useServerStore } from '@/stores/server.ts';
@@ -19,21 +18,15 @@ import ListTab from '../components/ListTab.tsx';
 import { LIST_STYLES } from '../components/listStyles.ts';
 import OnlineTab from '../components/OnlineTab.tsx';
 import OverviewHeader from '../components/OverviewHeader.tsx';
+import PageSkeleton from '../components/PageSkeleton.tsx';
 import { type ConfirmRequest, type PlayerManager, PlayerManagerContext } from '../components/playerManager.ts';
+import StatTiles from '../components/StatTiles.tsx';
 import { GAME_NAMES, gameText, gameUi } from '../games/index.ts';
-import { capabilityAccess, editHint, gamePermissions } from '../lib/access.ts';
-import { LIST_KINDS, type OnlinePlayers } from '../lib/model.ts';
+import { capabilityAccess, gamePermissions } from '../lib/access.ts';
+import type { OnlinePlayers } from '../lib/model.ts';
 import { withoutPlayer } from '../lib/players.ts';
 import { useExtTranslations } from '../translations.ts';
 import useMutationRunner from './useMutationRunner.ts';
-
-function TabCount({ children }: { children: ReactNode }) {
-  return (
-    <span className='rounded-full bg-(--mantine-color-default-hover) px-1.5 py-px text-[10px] leading-4'>
-      {children}
-    </span>
-  );
-}
 
 export default function PlayerManagerPage() {
   const { t: tExt } = useExtTranslations();
@@ -68,6 +61,18 @@ export default function PlayerManagerPage() {
 
   const online = capabilityAccess(game?.online ?? null, granted);
   const activeTab = tab ?? (state === 'running' && online.visible ? 'online' : (game?.lists[0]?.kind ?? 'online'));
+
+  // the tab row scrolls sideways on narrow screens; keep the active tab (e.g. opened from a tile) in sight
+  const tabList = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const list = tabList.current;
+    const active = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (!list || !active) return;
+    const left = active.offsetLeft - list.offsetLeft;
+    if (left < list.scrollLeft || left + active.offsetWidth > list.scrollLeft + list.clientWidth) {
+      list.scrollTo({ left: left - (list.clientWidth - active.offsetWidth) / 2, behavior: 'smooth' });
+    }
+  }, [activeTab]);
 
   const onlineKey = [...playerManagerQueryKey(serverUuid), 'online'];
   const onlineQuery = useQuery({
@@ -112,7 +117,7 @@ export default function PlayerManagerPage() {
             </div>
           </Alert>
         ) : (
-          <Spinner.Centered />
+          <PageSkeleton />
         )}
       </ServerContentContainer>
     );
@@ -143,16 +148,7 @@ export default function PlayerManagerPage() {
     confirm: setPendingConfirm,
   };
 
-  const hint = editHint(game.edit);
-  const hintText =
-    hint === 'transition'
-      ? text('method.transition', { state: text(`states.${state}`, {}).toLowerCase() })
-      : hint && text(`method.${hint}`, {});
-  // lists the game lacks but players look for get a tab explaining why
-  const missingLists = LIST_KINDS.flatMap((kind) => {
-    const note = ui.missingLists[kind];
-    return note && !game.lists.some((spec) => spec.kind === kind) ? [{ kind, note }] : [];
-  });
+  const notes = ui.notes(tExt);
 
   return (
     <ServerContentContainer title={title} subtitle={subtitle}>
@@ -167,48 +163,42 @@ export default function PlayerManagerPage() {
           />
 
           {restartRequired && (
-            <Alert color='yellow' withCloseButton onClose={dismissRestart}>
-              {text('header.restartRequired', { list: text('lists.whitelist.title', {}) })}
+            <Alert color='yellow' withCloseButton onClose={dismissRestart} className='text-sm!'>
+              <span className='text-sm'>
+                {text('header.restartRequired', { list: text('lists.whitelist.title', {}) })}
+              </span>
             </Alert>
           )}
           <FileErrorsAlert errors={overview.errors} />
 
-          {hintText && (
-            <p className='flex items-center gap-2 text-sm text-(--mantine-color-dimmed)'>
-              <FontAwesomeIcon icon={faCircleInfo} />
-              {hintText}
-            </p>
-          )}
+          <StatTiles activeTab={activeTab} online={onlineQuery.data} onSelect={setTab} />
 
           <Card>
-            <Tabs value={activeTab} onChange={setTab} keepMounted={false}>
-              <Tabs.List>
+            <Tabs
+              value={activeTab}
+              onChange={setTab}
+              keepMounted={false}
+              // one row that scrolls sideways on narrow screens instead of wrapping; the list's own bottom line
+              // only spans the visible width, so a background that scrolls along draws it under every tab
+              classNames={{
+                list: 'overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden',
+                tab: 'shrink-0',
+              }}
+              styles={{
+                list: {
+                  flexWrap: 'nowrap',
+                  background:
+                    'linear-gradient(var(--mantine-color-default-border), var(--mantine-color-default-border)) left bottom / 100% 2px no-repeat local',
+                },
+              }}
+            >
+              <Tabs.List ref={tabList}>
                 {game.online && (
-                  <Tabs.Tab
-                    value='online'
-                    leftSection={<FontAwesomeIcon icon={faPlug} />}
-                    rightSection={
-                      onlineQuery.data && (
-                        <TabCount>
-                          {onlineQuery.data.count}/{onlineQuery.data.max}
-                        </TabCount>
-                      )
-                    }
-                  >
+                  <Tabs.Tab value='online' leftSection={<FontAwesomeIcon icon={faPlug} />}>
                     {text('online.tab', {})}
                   </Tabs.Tab>
                 )}
                 {game.lists.map(({ kind }) => (
-                  <Tabs.Tab
-                    key={kind}
-                    value={kind}
-                    leftSection={<FontAwesomeIcon icon={LIST_STYLES[kind].tab} />}
-                    rightSection={<TabCount>{overview.lists[kind]?.length ?? 0}</TabCount>}
-                  >
-                    {text(`lists.${kind}.title`, {})}
-                  </Tabs.Tab>
-                ))}
-                {missingLists.map(({ kind }) => (
                   <Tabs.Tab key={kind} value={kind} leftSection={<FontAwesomeIcon icon={LIST_STYLES[kind].tab} />}>
                     {text(`lists.${kind}.title`, {})}
                   </Tabs.Tab>
@@ -225,17 +215,17 @@ export default function PlayerManagerPage() {
                   <ListTab spec={spec} />
                 </Tabs.Panel>
               ))}
-              {missingLists.map(({ kind, note }) => (
-                <Tabs.Panel key={kind} value={kind} pt='md'>
-                  <EmptyState
-                    flush
-                    icon={LIST_STYLES[kind].tab}
-                    title={note.title(tExt)}
-                    description={note.description(tExt)}
-                  />
-                </Tabs.Panel>
-              ))}
             </Tabs>
+
+            {notes.map((note) => (
+              <p
+                key={note}
+                className='mt-4 flex items-start gap-2 border-t border-(--mantine-color-default-border) pt-3 text-xs text-(--mantine-color-dimmed)'
+              >
+                <FontAwesomeIcon icon={faCircleInfo} className='mt-0.5' />
+                {note}
+              </p>
+            ))}
           </Card>
         </div>
       </PlayerManagerContext.Provider>

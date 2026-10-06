@@ -7,9 +7,9 @@ const minecraftJava: GameModule = {
   name: 'Minecraft Java',
   color: 'orange',
   // mc-heads renders the skin of a uuid (preferred, undashed) or a name
-  avatarUrl: (player) => {
+  avatarUrl: (player, size = 32) => {
     const key = player.id ? player.id.replaceAll('-', '').toLowerCase() : player.name;
-    return key ? `https://mc-heads.net/avatar/${encodeURIComponent(key)}/32` : null;
+    return key ? `https://mc-heads.net/avatar/${encodeURIComponent(key)}/${size}` : null;
   },
   wording: {
     'form.id': (t) => t('games.minecraftJava.uuid', {}),

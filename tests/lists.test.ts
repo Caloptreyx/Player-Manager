@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { addBody, isDuplicate, removeBody } from '../frontend/src/lib/lists.ts';
+import { addBody, banDate, isDuplicate, removeBody } from '../frontend/src/lib/lists.ts';
 import { bedrockGame, entry, javaGame, spec } from './fixtures.ts';
 
 const NOTCH = '069a79f4-44e9-4726-a5be-fca90e38aaf5';
@@ -61,5 +61,14 @@ describe('isDuplicate', () => {
     const ipBans = spec(javaGame('running'), 'ip_bans');
     assert.equal(isDuplicate(ipBans, bans, { name: null, id: null, ip: '2001:db8::1' }), true);
     assert.equal(isDuplicate(ipBans, bans, { name: null, id: null, ip: '2001:db8::2' }), false);
+  });
+});
+
+describe('banDate', () => {
+  test('keeps the date of java timestamps and leaves other values alone', () => {
+    assert.equal(banDate('2024-05-01 10:22:33 +0000'), '2024-05-01');
+    assert.equal(banDate('2024-05-01T10:22:33Z'), '2024-05-01');
+    assert.equal(banDate('forever'), 'forever');
+    assert.equal(banDate('2024-05-01'), '2024-05-01');
   });
 });

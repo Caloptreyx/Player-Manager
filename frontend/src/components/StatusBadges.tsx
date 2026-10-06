@@ -9,7 +9,7 @@ export function LevelBadge({ level }: { level: string }) {
   const { ui } = usePlayerManager();
 
   return (
-    <Badge size='xs' variant='light' color={ui.isOperatorLevel(level) ? 'violet' : 'gray'}>
+    <Badge size='sm' variant='light' color={ui.isOperatorLevel(level) ? 'violet' : 'gray'}>
       {ui.levelLabel(tExt, level, 'badge')}
     </Badge>
   );
@@ -24,19 +24,19 @@ export default function StatusBadges({ status, except }: { status: PlayerStatus;
     <>
       {operator &&
         (operator.level === null ? (
-          <Badge size='xs' variant='light' color='violet'>
+          <Badge size='sm' variant='light' color='violet'>
             {text('lists.operators.badge', {})}
           </Badge>
         ) : (
           <LevelBadge level={operator.level} />
         ))}
       {except !== 'whitelist' && status.whitelist && (
-        <Badge size='xs' variant='light' color='green'>
+        <Badge size='sm' variant='light' color='green'>
           {text('lists.whitelist.badge', {})}
         </Badge>
       )}
       {except !== 'bans' && status.bans && (
-        <Badge size='xs' variant='light' color='red'>
+        <Badge size='sm' variant='light' color='red'>
           {text('lists.bans.badge', {})}
         </Badge>
       )}

@@ -30,6 +30,7 @@ describe('gameUi', () => {
     assert.equal(avatarUrl({ name: 'Notch', id: NOTCH }), `https://mc-heads.net/avatar/${NOTCH.replaceAll('-', '')}/32`);
     assert.equal(avatarUrl({ name: '.Floodgate', id: null }), 'https://mc-heads.net/avatar/.Floodgate/32');
     assert.equal(avatarUrl({ name: null, id: null }), null);
+    assert.equal(avatarUrl({ name: 'Notch', id: null }, 96), 'https://mc-heads.net/avatar/Notch/96');
   });
 
   test('bedrock has no avatar service', () => {
@@ -61,6 +62,12 @@ describe('levels and notes', () => {
     const java = gameUi('minecraft_java');
     assert.equal(java.levelLabel(t, '3', 'badge'), 'games.minecraftJava.opLevel {"level":"3"}');
     assert.equal(java.levelLabel(t, '3', 'option'), 'games.minecraftJava.levels.3');
+  });
+
+  test('bedrock notes its missing ban list; other games have no notes', () => {
+    assert.deepEqual(gameUi('minecraft_bedrock').notes(t), ['games.minecraftBedrock.noBans']);
+    assert.deepEqual(gameUi('minecraft_java').notes(t), []);
+    assert.deepEqual(gameUi('terraria').notes(t), []);
   });
 
   test('java explains why a running server offers no operator options', () => {

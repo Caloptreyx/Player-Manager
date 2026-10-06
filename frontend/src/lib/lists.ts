@@ -51,3 +51,6 @@ export const isDuplicate = (spec: ListSpec, entries: readonly Entry[], candidate
   }
   return spec.levels === null && entries.some((entry) => samePlayer(entry, candidate));
 };
+
+/** The date part of a ban timestamp (Java writes `2024-05-01 10:22:33 +0000`); anything else (`forever`) as is. */
+export const banDate = (value: string): string => /^(\d{4}-\d{2}-\d{2})[ T]\d/.exec(value)?.[1] ?? value;

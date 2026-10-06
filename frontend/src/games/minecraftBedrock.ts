@@ -15,6 +15,7 @@ const minecraftBedrock: GameModule = {
     'badges.bypassesLimit': (t) => t('games.minecraftBedrock.ignoresLimit', {}),
     'lists.whitelist.title': (t) => t('games.minecraftBedrock.allowlist.title', {}),
     'lists.whitelist.empty': (t) => t('games.minecraftBedrock.allowlist.empty', {}),
+    'lists.whitelist.emptyDescription': (t) => t('games.minecraftBedrock.allowlist.emptyDescription', {}),
     'lists.whitelist.addTitle': (t) => t('games.minecraftBedrock.allowlist.addTitle', {}),
     'lists.whitelist.addOnline': (t) => t('games.minecraftBedrock.allowlist.addTitle', {}),
     'lists.whitelist.remove': (t) => t('games.minecraftBedrock.allowlist.remove', {}),
@@ -28,12 +29,7 @@ const minecraftBedrock: GameModule = {
   levelLabel: (t, level) => (isLevel(level) ? t(`games.minecraftBedrock.levels.${level}`, {}) : level),
   // members and visitors live in permissions.json too, but only operators have operator rights
   isOperatorLevel: (level) => level === 'operator',
-  missingLists: {
-    bans: {
-      title: (t) => t('games.minecraftBedrock.noBansTitle', {}),
-      description: (t) => t('games.minecraftBedrock.noBansDescription', {}),
-    },
-  },
+  notes: (t) => [t('games.minecraftBedrock.noBans', {})],
 };
 
 export default minecraftBedrock;

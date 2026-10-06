@@ -1,4 +1,4 @@
-import type { ListKind, ListSpec } from '../lib/model.ts';
+import type { ListSpec } from '../lib/model.ts';
 import type { PlayerRef } from '../lib/players.ts';
 import type { ExtT, ExtValues, GenericKey, Wording } from '../translations.ts';
 import minecraftBedrock from './minecraftBedrock.ts';
@@ -10,10 +10,10 @@ import minecraftJava from './minecraftJava.ts';
 export interface GameUi {
   /** Display name in the header; product names stay untranslated. */
   name: string;
-  /** Color of the name badge. */
+  /** Color of the game icon in the header. */
   color: string;
-  /** Avatar image of a player; null shows the initial of the name. */
-  avatarUrl: (player: PlayerRef) => string | null;
+  /** Avatar image of a player, `size` pixels wide (default 32); null shows the initial of the name. */
+  avatarUrl: (player: PlayerRef, size?: number) => string | null;
   /** Generic texts the game words differently. */
   wording: Wording;
   /** Label of an operator level on badges and in the level select. */
@@ -22,8 +22,8 @@ export interface GameUi {
   isOperatorLevel: (level: string) => boolean;
   /** An extra hint in the add form of a list. */
   addFormNote: (t: ExtT, spec: ListSpec) => string | null;
-  /** Lists the game does not have but players look for, shown as a tab explaining why. */
-  missingLists: Partial<Record<ListKind, { title: (t: ExtT) => string; description: (t: ExtT) => string }>>;
+  /** Informational lines under the lists, e.g. why a list players look for does not exist. */
+  notes: (t: ExtT) => string[];
 }
 
 /** A per-game module: the name plus whatever differs from the generic UI. */
@@ -36,7 +36,7 @@ const GENERIC: Omit<GameUi, 'name'> = {
   levelLabel: (_t, level) => level,
   isOperatorLevel: () => true,
   addFormNote: () => null,
-  missingLists: {},
+  notes: () => [],
 };
 
 /** Keyed by `Game.id`. */
