@@ -6,7 +6,7 @@ around a small per-game module system; the supported games today are **Minecraft
 **Minecraft: Bedrock Dedicated Server**. Open **Players** in the server sidebar to see who is online, kick
 or ban them, and edit the whitelist, operators and bans without touching the console or the server files.
 
-Package name: `dev.caloptreyx.playermanager` · Requires panel `>=1.2.3`
+Package name: `dev.caloptreyx.playermanager` · Requires panel `>=1.2.6`
 
 ## Features
 

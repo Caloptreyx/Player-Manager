@@ -15,7 +15,7 @@ use crate::{
 use axum::http::StatusCode;
 use shared::response::ApiResponse;
 use std::collections::HashMap;
-use wings_api::tunnel::QueryTcpTunnel;
+use wings_api::tunnel::QueryStreamTunnel;
 
 const JAVA_PORT: u16 = 25565;
 const RCON_PORT: u16 = 25575;
@@ -156,14 +156,14 @@ async fn connect(
     ctx: &Context<'_>,
     port: u16,
     password: &str,
-) -> Result<rcon::Session<QueryTcpTunnel>, TunnelError> {
+) -> Result<rcon::Session<QueryStreamTunnel>, TunnelError> {
     let stream = ctx.tcp(port).await?;
     rcon::Session::login(stream, password).await
 }
 
 /// Runs a command over RCON, logged like a console command.
 async fn rcon_command(
-    session: &mut rcon::Session<QueryTcpTunnel>,
+    session: &mut rcon::Session<QueryStreamTunnel>,
     actor: &Actor<'_>,
     command: &str,
 ) -> Result<String, TunnelError> {
@@ -318,7 +318,7 @@ pub async fn bedrock(ctx: &Context<'_>, actor: &Actor<'_>) -> Result<Online, Api
 async fn rcon_session(
     ctx: &Context<'_>,
     actor: &Actor<'_>,
-) -> Result<Option<rcon::Session<QueryTcpTunnel>>, ApiResponse> {
+) -> Result<Option<rcon::Session<QueryStreamTunnel>>, ApiResponse> {
     let settings = Settings::read(ctx.read_text_lossy(PROPERTIES).await?.as_deref());
     let Some((port, password)) = settings.rcon else {
         return Ok(None);

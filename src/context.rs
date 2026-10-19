@@ -23,7 +23,7 @@ use std::{collections::HashSet, time::Duration};
 use tokio::time::Instant;
 use wings_api::{
     DirectoryEntry,
-    tunnel::{QueryTcpTunnel, QueryUdpTunnel},
+    tunnel::{QueryStreamTunnel, QueryUdpTunnel},
 };
 
 /// Console lines read for player suggestions.
@@ -316,7 +316,7 @@ impl<'a> Context<'a> {
 
     /// A TCP tunnel to `port` of the server's container; wrap the exchange in
     /// [`crate::tunnel::bounded`].
-    pub async fn tcp(&self, port: u16) -> Result<QueryTcpTunnel, TunnelError> {
+    pub async fn tcp(&self, port: u16) -> Result<QueryStreamTunnel, TunnelError> {
         self.wings.tcp(port).await
     }
 

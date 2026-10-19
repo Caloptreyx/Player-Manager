@@ -10,7 +10,7 @@ use shared::{
 use tokio::io::AsyncReadExt;
 use wings_api::{
     client::{ApiHttpError, AsyncRequestReader, WingsClient},
-    tunnel::{QueryTcpTunnel, QueryUdpTunnel},
+    tunnel::{QueryStreamTunnel, QueryUdpTunnel},
 };
 
 const LIST_PER_PAGE: u64 = 100;
@@ -248,7 +248,7 @@ impl<'a> Wings<'a> {
     }
 
     /// A TCP tunnel to `port` of the server's container (no timeout of its own).
-    pub async fn tcp(&self, port: u16) -> Result<QueryTcpTunnel, TunnelError> {
+    pub async fn tcp(&self, port: u16) -> Result<QueryStreamTunnel, TunnelError> {
         self.client
             .open_tunnel_tcp(self.server.uuid, port)
             .await
