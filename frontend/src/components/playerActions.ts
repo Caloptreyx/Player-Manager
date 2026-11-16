@@ -9,10 +9,10 @@ import {
   type IconDefinition,
 } from '@fortawesome/free-solid-svg-icons';
 import { useNavigate } from 'react-router';
-import { addToList, kickPlayer, removeFromList } from '../api.ts';
 import type { Access } from '../lib/access.ts';
-import { addBody, removeBody } from '../lib/lists.ts';
 import type { ListKind } from '../lib/model.ts';
+import { addToList, kickPlayer, removeFromList } from '../api.ts';
+import { addBody, removeBody } from '../lib/lists.ts';
 import { type PlayerRef, playerStatus, samePlayer } from '../lib/players.ts';
 import { usePlayerManager, useText } from './playerManager.ts';
 

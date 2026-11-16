@@ -1,7 +1,7 @@
+import type { UseQueryResult } from '@tanstack/react-query';
 import { faChevronRight, faClockRotateLeft, faTriangleExclamation, faUsers } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Skeleton } from '@mantine/core';
-import type { UseQueryResult } from '@tanstack/react-query';
 import classNames from 'classnames';
 import { useState } from 'react';
 import { Link } from 'react-router';

@@ -16,9 +16,9 @@ import ThemeIcon from '@/elements/data-display/ThemeIcon.tsx';
 import Alert from '@/elements/feedback/Alert.tsx';
 import Switch from '@/elements/input/Switch.tsx';
 import Tooltip from '@/elements/overlays/Tooltip.tsx';
+import type { ServerState } from '../lib/model.ts';
 import { setWhitelistEnabled } from '../api.ts';
 import { type Access, editHint } from '../lib/access.ts';
-import type { ServerState } from '../lib/model.ts';
 import { usePlayerManager, useText } from './playerManager.ts';
 
 const STATE_COLORS: Record<ServerState, string> = {

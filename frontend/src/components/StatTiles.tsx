@@ -1,8 +1,8 @@
+import type { ReactNode } from 'react';
 import { faBan, faPlug, faUsers, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Skeleton } from '@mantine/core';
 import classNames from 'classnames';
-import type { ReactNode } from 'react';
 import Card from '@/elements/data-display/Card.tsx';
 import ThemeIcon from '@/elements/data-display/ThemeIcon.tsx';
 import type { ListKind, OnlinePlayers } from '../lib/model.ts';

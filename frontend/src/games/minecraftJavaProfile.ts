@@ -1,5 +1,5 @@
-import { prettifyId, type StatFormat } from '../lib/profiles.ts';
 import type { HighlightIcon, ProfileUi, StatHighlight } from './index.ts';
+import { prettifyId, type StatFormat } from '../lib/profiles.ts';
 
 // Item icons come from mc.nerothe.com, which serves the rendered inventory icon of every vanilla item and block
 // item of a game version by id (`/img/<version>/minecraft_<path>.png`, a small PNG; 404 for unknown ids). Checked

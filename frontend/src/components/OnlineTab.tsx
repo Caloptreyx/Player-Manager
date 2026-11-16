@@ -1,3 +1,4 @@
+import type { UseQueryResult } from '@tanstack/react-query';
 import {
   faArrowRotateRight,
   faEyeSlash,
@@ -10,7 +11,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { Skeleton } from '@mantine/core';
-import type { UseQueryResult } from '@tanstack/react-query';
 import { useState } from 'react';
 import { getHttpStatus, httpErrorToHuman } from '@/api/axios.ts';
 import Button from '@/elements/buttons/Button.tsx';
@@ -22,8 +22,8 @@ import type { Access } from '../lib/access.ts';
 import type { OnlinePlayers, Player } from '../lib/model.ts';
 import { matchesFilter, playerStatus, sortBy } from '../lib/players.ts';
 import ListPanel from './ListPanel.tsx';
-import PlayerCell from './PlayerCell.tsx';
 import { usePlayerActions } from './playerActions.ts';
+import PlayerCell from './PlayerCell.tsx';
 import { usePlayerManager, useText } from './playerManager.ts';
 import { ActionMenu } from './RowAction.tsx';
 import StatusBadges from './StatusBadges.tsx';

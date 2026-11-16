@@ -1,6 +1,6 @@
 import Tooltip from '@/elements/overlays/Tooltip.tsx';
-import { banDate } from '../lib/lists.ts';
 import type { Entry } from '../lib/model.ts';
+import { banDate } from '../lib/lists.ts';
 import { useText } from './playerManager.ts';
 
 // reason of a ban, then who issued it and when, as stored in the file; nothing for entries without them

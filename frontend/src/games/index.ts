@@ -1,7 +1,7 @@
 import type { ListSpec, Profile } from '../lib/model.ts';
 import type { PlayerRef } from '../lib/players.ts';
-import { prettifyId, type StatFormat } from '../lib/profiles.ts';
 import type { ExtT, ExtValues, GenericKey, Wording } from '../translations.ts';
+import { prettifyId, type StatFormat } from '../lib/profiles.ts';
 import minecraftBedrock from './minecraftBedrock.ts';
 import minecraftJava from './minecraftJava.ts';
 

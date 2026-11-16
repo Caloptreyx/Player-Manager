@@ -1,6 +1,6 @@
+import type { ReactNode } from 'react';
 import { faMagnifyingGlass } from '@fortawesome/free-solid-svg-icons';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import type { ReactNode } from 'react';
 import TextInput from '@/elements/input/TextInput.tsx';
 import { useText } from './playerManager.ts';
 

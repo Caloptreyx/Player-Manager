@@ -14,9 +14,9 @@ import Collapse from '@/elements/layout/Collapse.tsx';
 import SegmentedControl from '@/elements/layout/SegmentedControl.tsx';
 import { Modal, ModalFooter } from '@/elements/modals/Modal.tsx';
 import { useTranslations } from '@/providers/TranslationProvider.tsx';
+import type { ListSpec } from '../lib/model.ts';
 import { addToList } from '../api.ts';
 import { addBody, isDuplicate } from '../lib/lists.ts';
-import type { ListSpec } from '../lib/model.ts';
 import { knownId, sameName, suggestions } from '../lib/players.ts';
 import {
   type FieldError,
